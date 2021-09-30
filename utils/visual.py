@@ -13,7 +13,7 @@ def imshow3D(ndarray, x, y, z):
     plt.show()
 
 
-def imshow3D_opencv(ndarray, x, y, z):
+def imshow3D_opencv(ndarray, x=256, y=256, z=300):
 
     img = (ndarray + 1024)/4096
     cv2.imshow("x", img[x, :, :, 0].T)

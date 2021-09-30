@@ -45,13 +45,34 @@ class Patient(object):
         self.ct_origin = None
         self.pet_origin = None
         self.dosemap_origin = None
+        self.atlas_origin = None
 
         self.ct = None
         self.pet = None
         self.dosemap = None
+        self.atlas = None
 
     def load_origin(self):
-        self.ct_origin = nib.load(os.path.join(self.patient_folder, "ct"))
-        self.pet_origin = 
+        self.ct_origin = nib.load(os.path.join(self.patient_folder, "ct.hdr"))
+        self.pet_origin = nib.load(os.path.join(self.patient_folder, "pet.hdr"))
+        self.atlas_origin = nib.load(os.path.join(self.patient_folder, "atlas.hdr"))
+
+    def load_ndarray(self):
+        self.ct = np.load(os.path.join(self.patient_folder, "ct.npy"))
+        self.pet = np.load(os.path.join(self.patient_folder, "pet.npy"))
+        self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap.npy"))
+        self.atlas = np.load(os.path.join(self.patient_folder, "atlas.npy"))
+
+    def create_ndarray(self):
+        self.load_origin()
+        self.ct = self.ct_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
+        self.pet = self.pet_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
+
+        self.dosemap = read_raw(os.path.join(self.patient_folder, "dosemap.raw"), self.ct.shape)
+
+        np.save(os.path.join(self.patient_folder, "ct"), self.ct)
+        np.save(os.path.join(self.patient_folder, "pet"), self.pet)
+        np.save(os.path.join(self.patient_folder, "dosemap"), self.dosemap)
+
 
 
