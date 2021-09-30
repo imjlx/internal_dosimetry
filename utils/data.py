@@ -21,6 +21,15 @@ def read_nib(fpath):
     return data
 
 
+def read_raw(fpath, shape=None):
+    data = np.fromfile(fpath, dtype=np.float32)
+    if shape is None:
+        img = data.reshape(512, 512, -1, 1)
+    else:
+        img = data.reshape(shape)
+    return img
+
+
 def save_ndarray(dtype, r_fpath, s_fpath):
     if dtype == "nii":
         img = read_nib(r_fpath)
@@ -28,5 +37,21 @@ def save_ndarray(dtype, r_fpath, s_fpath):
     elif dtype == "hdr":
         pass
 
+
+class Patient(object):
+    def __init__(self, ID):
+        self.patient_folder = "dataset/patient" + ID
+
+        self.ct_origin = None
+        self.pet_origin = None
+        self.dosemap_origin = None
+
+        self.ct = None
+        self.pet = None
+        self.dosemap = None
+
+    def load_origin(self):
+        self.ct_origin = nib.load(os.path.join(self.patient_folder, "ct"))
+        self.pet_origin = 
 
 
