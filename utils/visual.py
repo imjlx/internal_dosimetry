@@ -3,32 +3,46 @@ import numpy as np
 import cv2
 
 
-def imshow3D(img, x, y, z):
-    plt.figure(dpi=300)
+def normalization(img, img_type):
+    cmap = None
+    if img_type == "ct":
+        img = (img + 1024) / 4096
+        cmap = "gray"
+    elif img_type == "pet":
+        percentile = np.percentile(img, 99.8)
+        img = (img / percentile).clip(max=1)
+        cmap = "hot"
+    elif img_type == "dosemap":
+        percentile = np.percentile(img, 99.8)
+        img = (img / percentile).clip(max=1)
+        cmap = "gist_heat"
+    elif img_type == "atlas":
+        img = img / 19
+        cmap = "tab20b"
+
+    return img, cmap
+
+
+def imshow3D(img, img_type, x, y, z):
+    img, cmap = normalization(img, img_type)
+    plt.figure(dpi=600)
     plt.subplot(1, 3, 1)
-    plt.imshow(img[x, :, :, 0], cmap="gray")
+    plt.imshow(img[x, :, :, 0].T, cmap=cmap)
+    plt.axis("off")
     plt.subplot(1, 3, 2)
-    plt.imshow(img[:, y, :, 0], cmap="gray")
+    plt.imshow(img[:, y, :, 0].T, cmap=cmap)
+    plt.axis("off")
     plt.subplot(1, 3, 3)
-    plt.imshow(img[:, :, z, 0], cmap="gray")
+    plt.imshow(img[:, :, z, 0].T, cmap=cmap)
+    plt.axis("off")
+
     plt.show()
 
 
 def imshow3D_opencv(img, img_type, x=256, y=256, z=600):
-    """
 
-    :param img:
-    :param img_type:
-    :param x:
-    :param y:
-    :param z:
-    :return:
-    """
-    # 首先将输入归一化至（0，1），不同的输入归一化取值范围不一样
-    if img_type == "ct":
-        img = (img + 1024)/4096
-    elif img_type == "dosemap":
-        img = np.clip(img * 10**8, 0, 1)
+    img, cmap = normalization(img, img_type)
+
     cv2.imshow("x", img[x, :, :, 0].T)
     cv2.imshow("y", img[:, y, :, 0].T)
     cv2.imshow("z", img[:, :, z, 0].T)
