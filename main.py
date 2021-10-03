@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from utils import data, visual
+from model import AutoEncoder
 
 
 def create_block(ID):
@@ -35,5 +36,14 @@ def show_img(fpath="dataset/patient5/patch/pet/1.npy", img_type="ct", x=64, y=64
     visual.imshow3D(img, img_type, x, y, z)
 
 
-show_img(fpath="dataset/patient5/atlas.npy", img_type="atlas", x=256, y=256, z=500)
+# show_img(fpath="dataset/patient5/atlas.npy", img_type="atlas", x=256, y=256, z=500)
+
+def show_net_structure():
+    net = AutoEncoder.AutoEncoder1()
+    print(net.summary())
+    tf.keras.utils.plot_model(net, to_file="AutoEncoder1.png", show_shapes=True, dpi=600)
+
+
+show_net_structure()
+
 
