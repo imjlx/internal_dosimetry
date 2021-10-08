@@ -1,12 +1,13 @@
 import numpy as np
 import os
 import nibabel as nib
+import tensorflow as tf
 
+import dataset
 
-def header_info(fpath):
-    img = nib.load(fpath)
-    print(img.header)
-    return img
+"""
+读取原始文件的方法
+"""
 
 
 def read_nib(fpath):
@@ -30,12 +31,39 @@ def read_raw(fpath, shape=None):
     return img
 
 
-def save_ndarray(dtype, r_fpath, s_fpath):
-    if dtype == "nii":
-        img = read_nib(r_fpath)
-        np.save(s_fpath, img)
-    elif dtype == "hdr":
+"""
+数据集处理中，读取的操作
+"""
+
+
+def read(fpath):
+    img = np.load(fpath)
+    return img
+
+
+def normalize(img, img_type):
+
+    if img_type == "ct":
+        img = (img + 1024) / 4096
+    elif img_type == "pet":
         pass
+    elif img_type == "dosemap":
+        pass
+
+    return img
+
+
+def load(fpath, img_type):
+
+    img = read(fpath.numpy())
+    img = normalize(img, img_type)
+
+    return img
+
+
+"""
+病人相关操作
+"""
 
 
 class Patient(object):
@@ -54,16 +82,18 @@ class Patient(object):
         self.atlas = None
         self.shape = None
 
+        self.n_patch = None
+
     def load_origin(self):
-        self.ct_origin = nib.load(os.path.join(self.patient_folder, "ct.hdr"))
-        self.pet_origin = nib.load(os.path.join(self.patient_folder, "pet.hdr"))
-        self.dosemap_origin = nib.load(os.path.join(self.patient_folder, "dosemap.hdr"))
-        self.atlas_origin = nib.load(os.path.join(self.patient_folder, "atlas.hdr"))
+        self.ct_origin = nib.load(os.path.join(self.patient_folder, "hdr/ct.hdr"))
+        self.pet_origin = nib.load(os.path.join(self.patient_folder, "hdr/pet.hdr"))
+        self.dosemap_origin = nib.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.hdr"))
+        self.atlas_origin = nib.load(os.path.join(self.patient_folder, "hdr/atlas.hdr"))
 
     def load_ndarray(self):
         self.ct = np.load(os.path.join(self.patient_folder, "ct.npy"))
         self.pet = np.load(os.path.join(self.patient_folder, "pet.npy"))
-        self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap.npy"))
+        self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
         self.atlas = np.load(os.path.join(self.patient_folder, "atlas.npy"))
         self.shape = self.ct.shape
 
@@ -76,10 +106,10 @@ class Patient(object):
 
         np.save(os.path.join(self.patient_folder, "ct.npy"), self.ct)
         np.save(os.path.join(self.patient_folder, "pet.npy"), self.pet)
-        np.save(os.path.join(self.patient_folder, "dosemap.npy"), self.dosemap)
+        np.save(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"), self.dosemap)
         np.save(os.path.join(self.patient_folder, "atlas.npy"), self.atlas)
 
-    def create_block(self, size=128, step=16, ratio=0.5):
+    def create_patch(self, size=128, step=16, ratio=0.5):
         self.load_ndarray()
         # 计算每个维度可取起始点的个数
         n_i = np.floor((self.shape[0]-size)/step) + 1
@@ -126,6 +156,67 @@ class Patient(object):
             return True
         else:
             return False
+
+    @staticmethod
+    def _source_tensor(particle, energy):
+        if particle == "electron":
+            n = 0
+        elif particle == "positron":
+            n = 1
+        elif particle == "proton":
+            n = 2
+        elif particle == "neutron":
+            n = 3
+        elif particle == "alpha":
+            n = 4
+        else:
+            n = 6
+            quit("Particle type error!")
+        source = np.zeros(shape=[8, 8, 8, 5])
+        source[:, :, :, n] = energy
+        return tf.constant(source, dtype=tf.float32)
+
+    def create_train_dataset(self, particle, energy):
+
+        ct = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/ct/*.npy"), shuffle=False)
+        pet = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/pet/*.npy"), shuffle=False)
+        dosemap = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/dosemap/*.npy"), shuffle=False)
+
+        self.n_patch = len(list(ct.as_numpy_iterator()))
+
+        ct = ct.map(lambda x: tf.py_function(func=load, inp=[x, "ct"], Tout=tf.float32))
+        pet = pet.map(lambda x: tf.py_function(func=load, inp=[x, "pet"], Tout=tf.float32))
+        dosemap = dosemap.map(lambda x: tf.py_function(func=load, inp=[x, "dosemap"], Tout=tf.float32))
+
+        self._source_tensor("positron", 10)
+        source = tf.data.Dataset.from_tensors(self._source_tensor(particle, energy)).repeat(self.n_patch)
+
+        ds = tf.data.Dataset.zip((ct, pet, source, dosemap))
+
+        return ds
+
+
+def create_train_dataset(p_ids, batch):
+
+    ds = None
+    n_patch = 0
+
+    # 将所有病人的dataset连接起来
+    for i, p_id in enumerate(p_ids):
+        patient = Patient(ID=p_id)
+        if i == 0:
+            ds = patient.create_train_dataset(particle="positron", energy=0.2498)
+        else:
+            ds = ds.concatenate(patient.create_train_dataset(particle="positron", energy=0.2498))
+        n_patch += patient.n_patch
+
+    # ds = ds.shuffle(buffer_size=n_patch).batch(batch)
+    ds = ds.batch(batch)
+
+    return ds
+
+
+
 
 
 

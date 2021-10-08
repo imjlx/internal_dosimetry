@@ -45,20 +45,20 @@ def up_stack(inputs, out_filters):
 def AutoEncoder1():
     ct_inputs = layers.Input(shape=[128, 128, 128, 1], name="CT")
     pet_inputs = layers.Input(shape=[128, 128, 128, 1], name="PET")
-    energy_inputs = layers.Input(shape=[128, 128, 128, 1], name="Energy")
 
     ct = down_stack(ct_inputs, 32)  # 64
     ct = down_stack(ct, 64)  # 32
     ct = down_stack(ct, 128)  # 16
     ct = down_stack(ct, 256)  # 8
 
-    pet = layers.Concatenate()([pet_inputs, energy_inputs])
-    pet = down_stack(pet, 32)  # 64
+    # pet = layers.Concatenate()([pet_inputs, energy_inputs])
+    pet = down_stack(pet_inputs, 32)  # 64
     pet = down_stack(pet, 64)  # 32
     pet = down_stack(pet, 128)  # 16
     pet = down_stack(pet, 256)  # 8
 
-    x = layers.Concatenate()([ct, pet])
+    energy_inputs = layers.Input(shape=[8, 8, 8, 5], name="Energy")
+    x = layers.Concatenate()([ct, pet, energy_inputs])
 
     x = up_stack(x, 128)
     x = up_stack(x, 64)
