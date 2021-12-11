@@ -37,6 +37,7 @@ def read_raw(fpath, shape=None):
 
 
 def read(fpath):
+
     img = np.load(fpath)
     return img
 
@@ -214,13 +215,4 @@ def create_train_dataset(p_ids, batch):
     ds = ds.batch(batch)
 
     return ds
-
-
-
-
-
-
-
-
-
 

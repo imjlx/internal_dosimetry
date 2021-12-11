@@ -57,8 +57,8 @@ def AutoEncoder1():
     pet = down_stack(pet, 128)  # 16
     pet = down_stack(pet, 256)  # 8
 
-    energy_inputs = layers.Input(shape=[8, 8, 8, 5], name="Energy")
-    x = layers.Concatenate()([ct, pet, energy_inputs])
+    source_inputs = layers.Input(shape=[8, 8, 8, 5], name="source")
+    x = layers.Concatenate()([ct, pet, source_inputs])
 
     x = up_stack(x, 128)
     x = up_stack(x, 64)
@@ -66,7 +66,7 @@ def AutoEncoder1():
     x = up_stack(x, 16)
     dosemap = Conv3x3x3(1)(x)
 
-    return tf.keras.Model(inputs=[ct_inputs, pet_inputs, energy_inputs], outputs=dosemap)
+    return tf.keras.Model(inputs=[ct_inputs, pet_inputs, source_inputs], outputs=dosemap)
 
 
 

@@ -20,7 +20,7 @@ def create_patch(ID):
     patient.create_patch()
 
 
-create_patch(1)
+# create_patch(6)
 
 
 def show_data_distribution(fpath, cut):
@@ -55,7 +55,9 @@ def show_img(fpath, img_type="ct", x=None, y=None, z=None):
     visual.imshow3D(img, img_type, x, y, z)
 
 
-# show_img(fpath="dataset/patient5/atlas.npy", img_type="atlas", x=None, y=None, z=None)
+show_img(fpath="dataset/patient5/patch/ct/1.npy", img_type="ct", x=None, y=None, z=None)
+show_img(fpath="dataset/patient5/patch/pet/1.npy", img_type="pet", x=None, y=None, z=None)
+show_img(fpath="dataset/patient5/patch/dosemap/1.npy", img_type="dosemap", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/ct.npy", img_type="ct", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/pet.npy", img_type="pet", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/dosemap_F18/dosemap.npy", img_type="dosemap", x=None, y=None, z=None)
