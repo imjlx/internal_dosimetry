@@ -112,7 +112,7 @@ class Patient(object):
 
     def create_patch(self, size=128, step=16, ratio=0.5):
         self.load_ndarray()
-        # 计算每个维度可取起始点的个数
+        # 计算每个维度可的个数
         n_i = np.floor((self.shape[0]-size)/step) + 1
         n_j = np.floor((self.shape[1]-size)/step) + 1
         n_k = np.floor((self.shape[2]-size)/step) + 1
