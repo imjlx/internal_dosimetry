@@ -5,7 +5,8 @@ import time
 import os
 from tqdm import tqdm
 
-from utils import data, loss, metrics, visual
+from utils import data
+from utils import Loss, Metrics, Visual
 from model import AutoEncoder
 
 
@@ -32,6 +33,7 @@ class TrainFramework(object):
     def train_step(self, ct, pet, source, dosemap):
         with tf.GradientTape() as g:
             dosemap = self.model(inputs=[ct, pet, source], training=True)
+
 
 
 

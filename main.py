@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import dataset
-from utils import data, visual
+from utils import data, Visual
 from model import AutoEncoder
 
 
@@ -52,7 +52,7 @@ def show_data_distribution(fpath, cut):
 
 def show_img(fpath, img_type="ct", x=None, y=None, z=None):
     img = np.load(fpath)
-    visual.imshow3D(img, img_type, x, y, z)
+    Visual.imshow3D(img, img_type, x, y, z)
 
 
 show_img(fpath="dataset/patient5/patch/ct/1.npy", img_type="ct", x=None, y=None, z=None)

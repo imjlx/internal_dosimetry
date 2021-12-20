@@ -69,29 +69,41 @@ def load(fpath, img_type):
 
 class Patient(object):
     def __init__(self, ID):
+        # 患者ID和患者文件夹路径
         self.ID = ID
         self.patient_folder = "dataset/patient" + str(ID)
 
+        # 保存nib读取的原始文件
         self.ct_origin = None
         self.pet_origin = None
         self.dosemap_origin = None
         self.atlas_origin = None
 
+        # 保存图像文件，4维
         self.ct = None
         self.pet = None
         self.dosemap = None
         self.atlas = None
+
+        # 图像的shape
         self.shape = None
 
+        # 生成的patch的个数
         self.n_patch = None
 
     def load_origin(self):
+        """
+        用nibabel读取.hdr & .img文件，读取后的结果为nib中的类，保存在self.XX_origin中
+        """
         self.ct_origin = nib.load(os.path.join(self.patient_folder, "hdr/ct.hdr"))
         self.pet_origin = nib.load(os.path.join(self.patient_folder, "hdr/pet.hdr"))
         self.dosemap_origin = nib.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.hdr"))
         self.atlas_origin = nib.load(os.path.join(self.patient_folder, "hdr/atlas.hdr"))
 
     def load_ndarray(self):
+        """
+        读取npy文件
+        """
         self.ct = np.load(os.path.join(self.patient_folder, "ct.npy"))
         self.pet = np.load(os.path.join(self.patient_folder, "pet.npy"))
         self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
@@ -99,16 +111,19 @@ class Patient(object):
         self.shape = self.ct.shape
 
     def create_ndarray(self):
+        """
+        从原始文件生成npy文件
+        """
         self.load_origin()
         self.ct = self.ct_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
         self.pet = self.pet_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
         self.dosemap = self.dosemap_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
         self.atlas = self.atlas_origin.get_fdata().squeeze(4).squeeze(4).astype(np.uint8)
 
-        np.save(os.path.join(self.patient_folder, "ct.npy"), self.ct)
-        np.save(os.path.join(self.patient_folder, "pet.npy"), self.pet)
+        np.save(os.path.join(self.patient_folder, "npy/ct.npy"), self.ct)
+        np.save(os.path.join(self.patient_folder, "npy/pet.npy"), self.pet)
         np.save(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"), self.dosemap)
-        np.save(os.path.join(self.patient_folder, "atlas.npy"), self.atlas)
+        np.save(os.path.join(self.patient_folder, "npy/atlas.npy"), self.atlas)
 
     def create_patch(self, size=128, step=16, ratio=0.5):
         self.load_ndarray()
