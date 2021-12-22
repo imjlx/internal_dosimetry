@@ -9,7 +9,6 @@ import dataset
 读取原始文件的方法
 """
 
-
 def read_nib(fpath):
     """
     读取.nii或.hdr文件，生成ndarray
@@ -36,12 +35,6 @@ def read_raw(fpath, shape=None):
 """
 
 
-def read(fpath):
-
-    img = np.load(fpath)
-    return img
-
-
 def normalize(img, img_type):
 
     if img_type == "ct":
@@ -55,8 +48,15 @@ def normalize(img, img_type):
 
 
 def load(fpath, img_type):
+    """
+    在数据集中, 用于将文件名转换为数据
+    :param fpath: 待读取文件的文件名
+    :param img_type: 数据类型(ct, pet, dosemap)
+    :return: 读取并处理后的
+    """
+    # 从文件名读取npy数据,输入的fpath是tensor,要利用.numpy()函数提取他的值
+    img = np.load(fpath.numpy())
 
-    img = read(fpath.numpy())
     img = normalize(img, img_type)
 
     return img
@@ -193,18 +193,25 @@ class Patient(object):
         return tf.constant(source, dtype=tf.float32)
 
     def create_train_dataset(self, particle, energy):
-
+        """
+        创建一个患者的所有patch的数据集,
+        其中: ct, pet, dosemap的patch数据需提前生产; source的输入在函数中生成.
+        :param particle: 生成dosemap的粒子的类型
+        :param energy: 粒子的能量
+        :return: ds, 结构为zip(ct, pet, source, dosemap)
+        """
+        # 创建文件名的数据集
         ct = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/ct/*.npy"), shuffle=False)
         pet = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/pet/*.npy"), shuffle=False)
         dosemap = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/dosemap/*.npy"), shuffle=False)
-
+        # 计算患者patch的个数
         self.n_patch = len(list(ct.as_numpy_iterator()))
-
+        # 利用load函数加载数据集
         ct = ct.map(lambda x: tf.py_function(func=load, inp=[x, "ct"], Tout=tf.float32))
         pet = pet.map(lambda x: tf.py_function(func=load, inp=[x, "pet"], Tout=tf.float32))
         dosemap = dosemap.map(lambda x: tf.py_function(func=load, inp=[x, "dosemap"], Tout=tf.float32))
 
-        self._source_tensor("positron", 10)
+        # self._source_tensor("positron", 10)
         source = tf.data.Dataset.from_tensors(self._source_tensor(particle, energy)).repeat(self.n_patch)
 
         ds = tf.data.Dataset.zip((ct, pet, source, dosemap))

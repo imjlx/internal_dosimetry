@@ -55,9 +55,9 @@ def show_img(fpath, img_type="ct", x=None, y=None, z=None):
     Visual.imshow3D(img, img_type, x, y, z)
 
 
-show_img(fpath="dataset/patient5/patch/ct/1.npy", img_type="ct", x=None, y=None, z=None)
-show_img(fpath="dataset/patient5/patch/pet/1.npy", img_type="pet", x=None, y=None, z=None)
-show_img(fpath="dataset/patient5/patch/dosemap/1.npy", img_type="dosemap", x=None, y=None, z=None)
+# show_img(fpath="dataset/patient5/patch/ct/1.npy", img_type="ct", x=None, y=None, z=None)
+# show_img(fpath="dataset/patient5/patch/pet/1.npy", img_type="pet", x=None, y=None, z=None)
+# show_img(fpath="dataset/patient5/patch/dosemap/1.npy", img_type="dosemap", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/ct.npy", img_type="ct", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/pet.npy", img_type="pet", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/dosemap_F18/dosemap.npy", img_type="dosemap", x=None, y=None, z=None)
@@ -83,6 +83,9 @@ def show_patient_dataset():
 def show_train_dataset():
     ds = data.create_train_dataset(p_ids=[5], batch=4)
     print(ds)
+    for n, (ct, pet, source, dosemap) in ds.enumerate():
+        if n == 0:
+            print(ct)
 
 
-# show_train_dataset()
+show_train_dataset()
