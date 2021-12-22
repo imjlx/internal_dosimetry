@@ -17,10 +17,10 @@ def create_npy(ID):
 
 def create_patch(ID):
     patient = data.Patient(ID)
-    patient.create_patch()
+    patient.create_patch_pro()
 
 
-# create_patch(6)
+create_patch(5)
 
 
 def show_data_distribution(fpath, cut):
@@ -87,5 +87,4 @@ def show_train_dataset():
         if n == 0:
             print(ct)
 
-
-show_train_dataset()
+# show_train_dataset()

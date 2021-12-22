@@ -2,12 +2,16 @@ import numpy as np
 import os
 import nibabel as nib
 import tensorflow as tf
+import numba as nb
+import tqdm
+import time
 
 import dataset
 
 """
 读取原始文件的方法
 """
+
 
 def read_nib(fpath):
     """
@@ -36,7 +40,6 @@ def read_raw(fpath, shape=None):
 
 
 def normalize(img, img_type):
-
     if img_type == "ct":
         img = (img + 1024) / 4096
     elif img_type == "pet":
@@ -65,6 +68,41 @@ def load(fpath, img_type):
 """
 病人相关操作
 """
+
+
+@nb.jit(parallel=True)
+def patch_index(atlas, size=128, step=16, ratio=0.5):
+    """
+    根据分割数据生成可取的块的坐标
+    :param atlas: 分割数据,ndarray
+    :param size: 块的大小
+    :param step: 块的间距
+    :param ratio: 是否取的依据: 组织的占比
+    :return: 可取的坐标的list
+    """
+    # 计算每个维度可取的个数
+    n_i = int(np.floor((atlas.shape[0] - size) / step) + 1)
+    n_j = int(np.floor((atlas.shape[1] - size) / step) + 1)
+    n_k = int(np.floor((atlas.shape[2] - size) / step) + 1)
+
+    # patch的位置
+    count_index = []
+
+    # 对所有的起始点进行遍历
+    for i in range(n_i):
+        i *= step
+        for j in range(n_j):
+            j *= step
+            for k in range(n_k):
+                k *= step
+
+                # 此时i,j,k均为块的开始坐标
+                # 据此切割出atlas
+                atlas_patch = atlas[i:i + size, j:j + size, k:k + size, :]
+                # 判断
+                if np.sum(atlas_patch > 0) / atlas_patch.size > ratio:
+                    count_index.append([i, j, k])
+    return count_index
 
 
 class Patient(object):
@@ -104,10 +142,10 @@ class Patient(object):
         """
         读取npy文件
         """
-        self.ct = np.load(os.path.join(self.patient_folder, "ct.npy"))
-        self.pet = np.load(os.path.join(self.patient_folder, "pet.npy"))
+        self.ct = np.load(os.path.join(self.patient_folder, "npy/ct.npy"))
+        self.pet = np.load(os.path.join(self.patient_folder, "npy/pet.npy"))
         self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
-        self.atlas = np.load(os.path.join(self.patient_folder, "atlas.npy"))
+        self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
         self.shape = self.ct.shape
 
     def create_ndarray(self):
@@ -127,28 +165,28 @@ class Patient(object):
 
     def create_patch(self, size=128, step=16, ratio=0.5):
         self.load_ndarray()
-        # 计算每个维度可的个数
-        n_i = np.floor((self.shape[0]-size)/step) + 1
-        n_j = np.floor((self.shape[1]-size)/step) + 1
-        n_k = np.floor((self.shape[2]-size)/step) + 1
+        # 计算每个维度可取的个数
+        n_i = np.floor((self.shape[0] - size) / step) + 1
+        n_j = np.floor((self.shape[1] - size) / step) + 1
+        n_k = np.floor((self.shape[2] - size) / step) + 1
 
         # 记录个数
         count = 0
         count_map = np.zeros((n_i.astype(np.uint8), n_j.astype(np.uint8), n_k.astype(np.uint8)), dtype=np.uint8)
 
         # 对所有的起始点进行遍历
-        for i in np.arange(0, step*n_i, step, dtype=np.uint16):
-            for j in np.arange(0, step*n_j, step, dtype=np.uint16):
-                for k in np.arange(0, step*n_k, step, dtype=np.uint16):
-                    ct = self.ct[i:i+size, j:j+size, k:k+size, :]
-                    pet = self.pet[i:i+size, j:j+size, k:k+size, :]
-                    dosemap = self.dosemap[i:i+size, j:j+size, k:k+size, :]
-                    atlas = self.atlas[i:i+size, j:j+size, k:k+size, :]
+        for i in np.arange(0, step * n_i, step, dtype=np.uint16):
+            for j in np.arange(0, step * n_j, step, dtype=np.uint16):
+                for k in np.arange(0, step * n_k, step, dtype=np.uint16):
+                    ct = self.ct[i:i + size, j:j + size, k:k + size, :]
+                    pet = self.pet[i:i + size, j:j + size, k:k + size, :]
+                    dosemap = self.dosemap[i:i + size, j:j + size, k:k + size, :]
+                    atlas = self.atlas[i:i + size, j:j + size, k:k + size, :]
                     print("(%d, %d, %d), " % (i, j, k), end=" ")
 
                     if self._if_count(atlas, ratio):
                         count += 1
-                        count_map[int(i/step), int(j/step), int(k/step)] = 1
+                        count_map[int(i / step), int(j / step), int(k / step)] = 1
                         np.save(self.patient_folder + "/patch/ct/" + str(count) + ".npy", ct)
                         np.save(self.patient_folder + "/patch/pet/" + str(count) + ".npy", pet)
                         np.save(self.patient_folder + "/patch/dosemap/" + str(count) + ".npy", dosemap)
@@ -159,6 +197,53 @@ class Patient(object):
 
         np.save(self.patient_folder + "/patch/count_map.npy", count_map)
         print(count)
+
+    def create_patch_pro(self, size=128, step=16, ratio=0.5, refresh=False):
+
+        # 判断保存路径是否存在, 若不存在则创建
+        dirname_ct = self.patient_folder + "/patch/ct"
+        dirname_pet = self.patient_folder + "/patch/pet"
+        dirname_dosemap = self.patient_folder + "/patch/dosemap_F18"
+        for dirname in [dirname_ct, dirname_pet, dirname_dosemap]:
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
+
+        # 加载数据
+        self.load_ndarray()
+
+        # 获取可取patch的坐标
+        # 坐标文件的路径
+        index_path = self.patient_folder+"/patch/index_list.npy"
+        # 如果坐标文件不存在或刷新, 生成新的坐标文件
+        if (not os.path.exists(index_path)) or refresh:
+            # 生成可取块的坐标
+            print("Generating Index....")
+            t_start = time.time()
+            index_list = patch_index(self.atlas, size=size, step=step, ratio=ratio)
+            t_end = time.time()
+            print("Index Generated! %d patches, spent %.2f s" % (len(index_list), t_end - t_start))
+            # 保存坐标
+            index_list = np.array(index_list)
+            np.save(self.patient_folder + "/patch/index_list.npy", index_list)
+        # 如果文件存在且不刷新, 直接读取
+        else:
+            index_list = np.load(index_path)
+            print("Index loaded! %d patches" % len(index_list))
+
+
+
+        # 提取并保存为npy文件
+        n = 0
+        time.sleep(0.01)
+        with tqdm.tqdm(index_list) as bar:
+            for i, j, k in bar:
+                bar.set_description("Saving .npy file")
+
+                n += 1
+                np.save(os.path.join(dirname_ct, str(n)+".npy"), self.ct[i:i + size, j:j + size, k:k + size, :])
+                np.save(os.path.join(dirname_pet, str(n)+".npy"), self.pet[i:i + size, j:j + size, k:k + size, :])
+                np.save(os.path.join(dirname_dosemap, str(n)+".npy"), self.dosemap[i:i + size, j:j + size, k:k + size, :])
+
 
     @staticmethod
     def _if_count(atlas, ratio):
@@ -220,7 +305,6 @@ class Patient(object):
 
 
 def create_train_dataset(p_ids, batch):
-
     ds = None
     n_patch = 0
 
@@ -237,4 +321,3 @@ def create_train_dataset(p_ids, batch):
     ds = ds.batch(batch)
 
     return ds
-
