@@ -150,7 +150,7 @@ class Patient(object):
 
     def create_ndarray(self):
         """
-        从原始文件生成npy文件
+        从hdr文件生成npy文件
         """
         self.load_origin()
         self.ct = self.ct_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
@@ -229,8 +229,6 @@ class Patient(object):
         else:
             index_list = np.load(index_path)
             print("Index loaded! %d patches" % len(index_list))
-
-
 
         # 提取并保存为npy文件
         n = 0

@@ -5,22 +5,52 @@ import numpy as np
 import dataset
 from utils import data, Visual
 from model import AutoEncoder
+from utils import RemoveBed
 
 
-def create_npy(ID):
-    patient = data.Patient(ID)
-    patient.create_ndarray()
+"""
+    前期数据生成
+"""
 
 
-# create_npy(6)
+# 移除CT中的床位信息
+def remove_bed(IDs):
+    for ID in IDs:
+        read_path = "dataset/patient" + str(ID) + "/nii/Patient" + str(ID) + "_CT.nii"
+        save_path = "dataset/patient" + str(ID) + "/nii/Patient" + str(ID) + "_CT_noBed.nii"
+        RemoveBed.remove_bed(read_path, save_path)
+        print("Finish patient ", ID)
 
 
-def create_patch(ID):
-    patient = data.Patient(ID)
-    patient.create_patch_pro()
+# remove_bed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+remove_bed([11])
 
 
-create_patch(5)
+# 从hdr文件生成npy文件
+def create_npy(IDs):
+    for ID in IDs:
+        patient = data.Patient(ID)
+        patient.create_ndarray()
+        print("Finish patient ", ID)
+
+
+# create_npy([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+
+
+# 生成切块文件
+def create_patch(IDs):
+    for ID in IDs:
+        patient = data.Patient(ID)
+        patient.create_patch_pro()
+        print("Finish patient ", ID)
+
+
+# create_patch([1])
+
+
+"""
+    数据分析
+"""
 
 
 def show_data_distribution(fpath, cut):
@@ -61,6 +91,12 @@ def show_img(fpath, img_type="ct", x=None, y=None, z=None):
 # show_img(fpath="dataset/patient6/ct.npy", img_type="ct", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/pet.npy", img_type="pet", x=None, y=None, z=None)
 # show_img(fpath="dataset/patient6/dosemap_F18/dosemap.npy", img_type="dosemap", x=None, y=None, z=None)
+
+
+
+"""
+    网络相关
+"""
 
 
 def show_net_structure():
