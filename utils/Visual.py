@@ -3,6 +3,49 @@ import numpy as np
 import cv2
 
 
+class Image(object):
+    def __init__(self, img, img_type):
+        self.img = img
+        self.type = img_type
+        self.shape = self.img.shape
+        self.N = self.img.size
+        self.max = self.img.max(initial=None)
+        self.min = self.img.min(initial=None)
+
+        if self.type == "dosemap":
+            self.percentile = np.percentile(self.img, 99.8)
+        elif self.type != "atlas":
+            self.percentile = np.percentile(self.img, 99.8)
+
+        self.cmap = None
+
+    def hist(self, save_path=None, origin=False):
+        arr = self.img.flatten()
+
+        fig, ax = plt.subplots()
+        if self.type in ["ct", "ct_origin", "ct_AutoRemoveBed"]:
+            plt.hist(arr, bins=200, range=(-900, self.percentile))
+            ax.set_xlim(-900, self.percentile)
+
+        elif self.type == "atlas":
+            plt.hist(arr, bins=19, range=(1, 20))
+            ax.set_xlim(0, 20)
+            ax.xaxis.set_ticks(range(0, 22, 2))
+
+        else:
+            plt.hist(arr, bins=200, range=(self.percentile / 100, self.percentile))
+            ax.set_xlim(0, self.percentile)
+            plt.text(0.6, 0.7, s="Max    :" + str(self.max), transform=ax.transAxes)
+            plt.text(0.6, 0.6, s="percent:" + str(self.percentile), transform=ax.transAxes)
+            plt.text(0.6, 0.5, s="ratio  :" + str(round(self.max / self.percentile, 1)), transform=ax.transAxes)
+
+        plt.title("Gray histogram -- " + self.type)
+
+        if save_path is not None:
+            plt.savefig(save_path+"/hist_"+self.type+".png", dpi=600)
+        plt.show()
+
+
 def normalize(img, img_type):
     cmap = None
     if img_type == "ct":

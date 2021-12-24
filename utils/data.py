@@ -3,10 +3,11 @@ import os
 import nibabel as nib
 import tensorflow as tf
 import numba as nb
+import pandas as pd
 import tqdm
 import time
 
-import dataset
+from utils import Visual
 
 """
 读取原始文件的方法
@@ -105,6 +106,44 @@ def patch_index(atlas, size=128, step=16, ratio=0.5):
     return count_index
 
 
+@nb.jit(parallel=True)
+def create_ct_without_bed(ct_origin, atlas, ct_AutoRemoveBed):
+    """
+    利用分割数据(不确定是否完全包含人体) 和 自动去床(丢失肺部)结果, 生成有肺部的, 去掉床的CT图像
+    :param ct_origin: 原始CT
+    :param atlas: 分割数据
+    :param ct_AutoRemoveBed: 自动去床CT
+    :return: 生成的结果CT
+    """
+    # 对所有体素遍历
+    for i in range(atlas.shape[0]):
+        for j in range(atlas.shape[1]):
+            for k in range(atlas.shape[2]):
+                # 如果是atlas中的组织, 就用原始ct的值覆盖自动去床ct的值, 找回肺部
+                if atlas[i, j, k, 0] > 0:
+                    ct_AutoRemoveBed[i, j, k, 0] = ct_origin[i, j, k, 0]
+
+    return ct_AutoRemoveBed
+
+
+@nb.jit(parallel=True)
+def create_dosemap_without_air(dosemap_withAir, ct):
+    """
+    利用ct去掉dosemap中的空气
+    :param dosemap_withAir:
+    :param ct:
+    :return:
+    """
+    for i in range(ct.shape[0]):
+        for j in range(ct.shape[1]):
+            for k in range(ct.shape[2]):
+                # 如果是atlas中的组织, 就用原始ct的值覆盖自动去床ct的值, 找回肺部
+                if ct[i, j, k, 0] == -1024:
+                    dosemap_withAir[i, j, k, 0] = 0
+
+    return dosemap_withAir
+
+
 class Patient(object):
     def __init__(self, ID):
         # 患者ID和患者文件夹路径
@@ -112,15 +151,19 @@ class Patient(object):
         self.patient_folder = "dataset/patient" + str(ID)
 
         # 保存nib读取的原始文件
-        self.ct_origin = None
-        self.pet_origin = None
-        self.dosemap_origin = None
-        self.atlas_origin = None
+        self.ct_hdr = None
+        self.ct_AutoRemoveBed_hdr = None
+        self.pet_hdr = None
+        self.dosemap_hdr = None
+        self.atlas_hdr = None
 
         # 保存图像文件，4维
         self.ct = None
+        self.ct_origin = None
+        self.ct_AutoRemoveBed = None
         self.pet = None
         self.dosemap = None
+        self.dosemap_withAir = None
         self.atlas = None
 
         # 图像的shape
@@ -129,74 +172,145 @@ class Patient(object):
         # 生成的patch的个数
         self.n_patch = None
 
-    def load_origin(self):
+    def load_hdr(self, isDm=True, isOther=True):
         """
         用nibabel读取.hdr & .img文件，读取后的结果为nib中的类，保存在self.XX_origin中
         """
-        self.ct_origin = nib.load(os.path.join(self.patient_folder, "hdr/ct.hdr"))
-        self.pet_origin = nib.load(os.path.join(self.patient_folder, "hdr/pet.hdr"))
-        self.dosemap_origin = nib.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.hdr"))
-        self.atlas_origin = nib.load(os.path.join(self.patient_folder, "hdr/atlas.hdr"))
+        if isOther:
+            self.ct_hdr = nib.load(os.path.join(self.patient_folder, "hdr/ct.hdr"))
+            self.ct_AutoRemoveBed_hdr = nib.load(os.path.join(self.patient_folder, "hdr/ct_AutoRemoveBed.hdr"))
+            self.pet_hdr = nib.load(os.path.join(self.patient_folder, "hdr/pet.hdr"))
+            self.atlas_hdr = nib.load(os.path.join(self.patient_folder, "hdr/atlas.hdr"))
 
-    def load_ndarray(self):
+        if isDm:
+            self.dosemap_hdr = nib.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.hdr"))
+
+        # 将基本信息保存在excel中
+        info = pd.read_excel("dataset/info.xlsx", index_col="ID")
+
+        if isOther:
+            for img_type, header in zip(["ct", "atlas", "pet"],
+                                        [self.ct_hdr.header, self.atlas_hdr.header, self.pet_hdr.header]):
+                info.loc[str(self.ID)+"_"+img_type, "dimx":"pixdimz"] = [
+                    header.get_data_shape()[0], header.get_data_shape()[1], header.get_data_shape()[2],
+                    header.get_zooms()[0], header.get_zooms()[1], header.get_zooms()[2]]
+        if isDm:
+            img_type = "dosemap"
+            header = self.dosemap_hdr.header
+            info.loc[str(self.ID) + "_" + img_type, "dimx":"pixdimz"] = [
+                header.get_data_shape()[0], header.get_data_shape()[1], header.get_data_shape()[2],
+                header.get_zooms()[0], header.get_zooms()[1], header.get_zooms()[2]]
+
+        info.to_excel("dataset/info.xlsx")
+
+    def load_npy(self):
         """
         读取npy文件
         """
         self.ct = np.load(os.path.join(self.patient_folder, "npy/ct.npy"))
+        self.ct_origin = np.load(os.path.join(self.patient_folder, "npy/ct_origin.npy"))
+        self.ct_AutoRemoveBed = np.load(os.path.join(self.patient_folder, "npy/ct_AutoRemoveBed.npy"))
         self.pet = np.load(os.path.join(self.patient_folder, "npy/pet.npy"))
         self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
+        self.dosemap_withAir = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap_withAir.npy"))
         self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
+
         self.shape = self.ct.shape
 
-    def create_ndarray(self):
+    def create_npy(self, isDm=True, isOther=True):
         """
         从hdr文件生成npy文件
         """
-        self.load_origin()
-        self.ct = self.ct_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-        self.pet = self.pet_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-        self.dosemap = self.dosemap_origin.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-        self.atlas = self.atlas_origin.get_fdata().squeeze(4).squeeze(4).astype(np.uint8)
+        # 判断保存路径是否存在, 若不存在则创建
+        dirname = self.patient_folder + "/npy"
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+
+        # 读取原始文件, 生成npy文件
+        self.load_hdr(isDm=isDm, isOther=isOther)
+
+        if isOther:
+            self.ct_origin = self.ct_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
+            self.ct_AutoRemoveBed = self.ct_AutoRemoveBed_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
+            self.pet = self.pet_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
+            self.atlas = self.atlas_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.uint8)
+            np.save(os.path.join(self.patient_folder, "npy/ct_origin.npy"), self.ct_origin)
+            np.save(os.path.join(self.patient_folder, "npy/ct_AutoRemoveBed.npy"), self.ct_AutoRemoveBed)
+            np.save(os.path.join(self.patient_folder, "npy/pet.npy"), self.pet)
+            np.save(os.path.join(self.patient_folder, "npy/atlas.npy"), self.atlas)
+
+        if isDm:
+            self.dosemap_withAir = self.dosemap_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
+            np.save(os.path.join(self.patient_folder, "dosemap_F18/dosemap_withAir.npy"), self.dosemap_withAir)
+
+    def create_ct_without_bed(self):
+        self.ct_origin = np.load(os.path.join(self.patient_folder, "npy/ct_origin.npy"))
+        self.ct_AutoRemoveBed = np.load(os.path.join(self.patient_folder, "npy/ct_AutoRemoveBed.npy"))
+        self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
+
+        self.ct = create_ct_without_bed(self.ct_origin, self.atlas, self.ct_AutoRemoveBed)
 
         np.save(os.path.join(self.patient_folder, "npy/ct.npy"), self.ct)
-        np.save(os.path.join(self.patient_folder, "npy/pet.npy"), self.pet)
+
+    def create_dosemap_without_air(self):
+        self.ct = np.load(os.path.join(self.patient_folder, "npy/ct.npy"))
+        self.dosemap_withAir = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap_withAir.npy"))
+
+        self.dosemap = create_dosemap_without_air(self.dosemap_withAir, self.ct)
         np.save(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"), self.dosemap)
-        np.save(os.path.join(self.patient_folder, "npy/atlas.npy"), self.atlas)
 
-    def create_patch(self, size=128, step=16, ratio=0.5):
-        self.load_ndarray()
-        # 计算每个维度可取的个数
-        n_i = np.floor((self.shape[0] - size) / step) + 1
-        n_j = np.floor((self.shape[1] - size) / step) + 1
-        n_k = np.floor((self.shape[2] - size) / step) + 1
+    def info_numerical(self, isDm=True, isOther=True):
 
-        # 记录个数
-        count = 0
-        count_map = np.zeros((n_i.astype(np.uint8), n_j.astype(np.uint8), n_k.astype(np.uint8)), dtype=np.uint8)
+        info = pd.read_excel("dataset/info.xlsx", index_col="ID")
 
-        # 对所有的起始点进行遍历
-        for i in np.arange(0, step * n_i, step, dtype=np.uint16):
-            for j in np.arange(0, step * n_j, step, dtype=np.uint16):
-                for k in np.arange(0, step * n_k, step, dtype=np.uint16):
-                    ct = self.ct[i:i + size, j:j + size, k:k + size, :]
-                    pet = self.pet[i:i + size, j:j + size, k:k + size, :]
-                    dosemap = self.dosemap[i:i + size, j:j + size, k:k + size, :]
-                    atlas = self.atlas[i:i + size, j:j + size, k:k + size, :]
-                    print("(%d, %d, %d), " % (i, j, k), end=" ")
+        if isOther:
+            self.ct = np.load(os.path.join(self.patient_folder, "npy/ct.npy"))
+            self.pet = np.load(os.path.join(self.patient_folder, "npy/pet.npy"))
+            self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
 
-                    if self._if_count(atlas, ratio):
-                        count += 1
-                        count_map[int(i / step), int(j / step), int(k / step)] = 1
-                        np.save(self.patient_folder + "/patch/ct/" + str(count) + ".npy", ct)
-                        np.save(self.patient_folder + "/patch/pet/" + str(count) + ".npy", pet)
-                        np.save(self.patient_folder + "/patch/dosemap/" + str(count) + ".npy", dosemap)
-                        # np.save(self.patient_folder + "/patch/atlas/" + str(count) + ".npy", atlas)
-                        print("count")
-                    else:
-                        print("discount")
+            # ct和pet处理相同
+            for img_type, img in zip(["ct", "pet"], [self.ct, self.pet]):
+                img_max = img.max(initial=None)
+                average = np.average(img)
+                median = np.median(img)
+                percentile = np.percentile(img, 99.8)
 
-        np.save(self.patient_folder + "/patch/count_map.npy", count_map)
-        print(count)
+                info.loc[str(self.ID) + "_" + img_type, "Min":"percentile_r"] = [
+                    img.min(initial=None), img_max,
+                    average, average/img_max,
+                    median, median/img_max,
+                    percentile, percentile/img_max
+                ]
+
+            # atlas只求最值
+            info.loc[str(self.ID) + "_atlas", "Min":"Max"] = [self.atlas.max(initial=None), self.atlas.min(initial=None)]
+
+        if isDm:
+            img_type = "dosemap"
+            img = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
+
+            img_max = img.max(initial=None)
+            average = np.average(img)
+            median = np.median(img)
+            percentile = np.percentile(img, 99.8)
+
+            info.loc[str(self.ID) + "_" + img_type, "Min":"percentile_r"] = [
+                img.min(initial=None), img_max,
+                average, average / img_max,
+                median, median / img_max,
+                percentile, percentile / img_max
+            ]
+
+        info.to_excel("dataset/info.xlsx")
+
+    def hist(self):
+        self.load_npy()
+        for data, img_type in zip([self.ct, self.ct_origin, self.ct_AutoRemoveBed,
+                                   self.dosemap_withAir, self.dosemap, self.atlas, self.pet],
+                                  ["ct", "ct_origin", "ct_AutoRemoveBed",
+                                   "dosemap_withAir", "dosemap", "atlas", "pet"]):
+            img = Visual.Image(data, img_type)
+            img.hist(self.patient_folder)
 
     def create_patch_pro(self, size=128, step=16, ratio=0.5, refresh=False):
 
@@ -209,11 +323,11 @@ class Patient(object):
                 os.makedirs(dirname)
 
         # 加载数据
-        self.load_ndarray()
+        self.load_npy()
 
         # 获取可取patch的坐标
         # 坐标文件的路径
-        index_path = self.patient_folder+"/patch/index_list.npy"
+        index_path = self.patient_folder + "/patch/index_list.npy"
         # 如果坐标文件不存在或刷新, 生成新的坐标文件
         if (not os.path.exists(index_path)) or refresh:
             # 生成可取块的坐标
@@ -238,23 +352,10 @@ class Patient(object):
                 bar.set_description("Saving .npy file")
 
                 n += 1
-                np.save(os.path.join(dirname_ct, str(n)+".npy"), self.ct[i:i + size, j:j + size, k:k + size, :])
-                np.save(os.path.join(dirname_pet, str(n)+".npy"), self.pet[i:i + size, j:j + size, k:k + size, :])
-                np.save(os.path.join(dirname_dosemap, str(n)+".npy"), self.dosemap[i:i + size, j:j + size, k:k + size, :])
-
-
-    @staticmethod
-    def _if_count(atlas, ratio):
-        is_organ = 0
-        for i in range(atlas.shape[0]):
-            for j in range(atlas.shape[1]):
-                for k in range(atlas.shape[2]):
-                    if atlas[i, j, k, 0] != 0:
-                        is_organ += 1
-        if is_organ > ratio * atlas.size:
-            return True
-        else:
-            return False
+                np.save(os.path.join(dirname_ct, str(n) + ".npy"), self.ct[i:i + size, j:j + size, k:k + size, :])
+                np.save(os.path.join(dirname_pet, str(n) + ".npy"), self.pet[i:i + size, j:j + size, k:k + size, :])
+                np.save(os.path.join(dirname_dosemap, str(n) + ".npy"),
+                        self.dosemap[i:i + size, j:j + size, k:k + size, :])
 
     @staticmethod
     def _source_tensor(particle, energy):

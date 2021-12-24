@@ -78,10 +78,10 @@ def bedmask(vol):
     return result
 
 
-def remove_bed(read_path, save_path):
+def remove_bed(read_path, save_path, lower_threshold=600):
     sitk_src = sitk.ReadImage(read_path)
     sitk_src = sitk_src + 1024
-    sitk_seg = sitk.BinaryThreshold(sitk_src, lowerThreshold=600, upperThreshold=3000, insideValue=255, outsideValue=0)
+    sitk_seg = sitk.BinaryThreshold(sitk_src, lowerThreshold=lower_threshold, upperThreshold=3000, insideValue=255, outsideValue=0)
 
     sitk_open = sitk.BinaryMorphologicalOpening(sitk_seg)
     sitk_open = GetLargestConnectedComponent(sitk_open)

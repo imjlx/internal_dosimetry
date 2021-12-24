@@ -1,6 +1,8 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import numpy as np
+import SimpleITK as sitk
+import os
 
 import dataset
 from utils import data, Visual
@@ -9,32 +11,84 @@ from utils import RemoveBed
 
 
 """
-    前期数据生成
+    前期数据生成**********************************************************************************************************
 """
 
 
+# 删除文件
+def remove_file(fpath):
+
+    if os.path.exists(fpath):
+        os.remove(fpath)
+        print(fpath, " removed")
+    else:
+        print(fpath, " do not exist")
+
+
+def remove_patient_file(IDs, fpath_relative):
+    for ID in IDs:
+        fpath = "dataset/patient" + str(ID) + "/" + fpath_relative
+        remove_file(fpath)
+
+
+# remove_patient_file([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], "hdr/ct_noBed.hdr")
+# remove_patient_file([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], "hdr/ct_noBed.img")
+
+# for ID in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]:
+#    remove_file("dataset/patient"+str(ID)+"/nii/Patient"+str(ID)+"_CT_noBed.nii")
+
+
 # 移除CT中的床位信息
-def remove_bed(IDs):
+def remove_bed(IDs, lower_threshold=600):
     for ID in IDs:
         read_path = "dataset/patient" + str(ID) + "/nii/Patient" + str(ID) + "_CT.nii"
-        save_path = "dataset/patient" + str(ID) + "/nii/Patient" + str(ID) + "_CT_noBed.nii"
-        RemoveBed.remove_bed(read_path, save_path)
+        save_path = "dataset/patient" + str(ID) + "/nii/ct_AutoRemoveBed.nii"
+        RemoveBed.remove_bed(read_path, save_path, lower_threshold)
         print("Finish patient ", ID)
 
 
-# remove_bed([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
-remove_bed([11])
+# remove_bed([1, 2, 3, 5, 6, 7, 8, 9, 10, 11])
+# remove_bed([1, 2])
 
 
 # 从hdr文件生成npy文件
-def create_npy(IDs):
+def create_npy(IDs, isDm=True, isOther=True):
     for ID in IDs:
         patient = data.Patient(ID)
-        patient.create_ndarray()
+        patient.create_npy(isDm, isOther)
         print("Finish patient ", ID)
 
 
-# create_npy([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+# create_npy([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], isDm=False)
+# create_npy([1, 2, 4, 5, 6])
+# create_npy([3, 7, 8])
+
+
+def create_ct_without_bed(IDs):
+    for ID in IDs:
+        patient = data.Patient(ID)
+        patient.create_ct_without_bed()
+        print("Finish patient ", ID)
+
+
+# create_ct_without_bed([1, 2, 3, 4, 5, 6, 7, 8])
+
+'''ct = np.load("dataset/patient1/npy/ct.npy")
+ct_img = sitk.GetImageFromArray(ct)
+sitk.WriteImage(ct_img, "dataset/test_ct.nii")'''
+
+
+def create_dosemap_without_air(IDs):
+    for ID in IDs:
+        patient = data.Patient(ID)
+        patient.create_dosemap_without_air()
+        print("Finish patient ", ID)
+
+
+# create_dosemap_without_air([1, 2, 3, 4, 5, 6, 7, 8])
+'''dosemap = np.load("dataset/patient1/dosemap_F18/dosemap.npy")
+dosemap_img = sitk.GetImageFromArray(dosemap)
+sitk.WriteImage(dosemap_img, "dataset/test_dosemap.nii")'''
 
 
 # 生成切块文件
@@ -49,35 +103,32 @@ def create_patch(IDs):
 
 
 """
-    数据分析
+    数据分析*************************************************************************************************************
 """
 
-
-def show_data_distribution(fpath, cut):
-    img = np.load(fpath)
-    print("shape: ", img.shape)
-    print("dtype: ", img.dtype)
-    print("min:   ", img.min())
-    print("max:   ", img.max())
-    # print("SUM:   ", img.sum())
-
-    arr = img.flatten()
-    plt.figure()
-
-    if cut is True:
-        percentile = np.percentile(img, 99.9)
-        print(percentile)
-        plt.hist(arr, bins=200, range=(percentile/50, percentile))
-        plt.xlim(0, percentile)
-    else:
-        plt.hist(arr, bins=200)
-
-    plt.title("histogram")
-    plt.show()
+# ct = Visual.Image("dataset/patient2/npy/ct.npy", "ct")
+# ct.hist("dataset/patient2/")
 
 
-# show_data_distribution(fpath="dataset/patient1/dosemap_F18/dosemap.npy", cut=False)
-# show_data_distribution(fpath="dataset/patient1/pet.npy", cut=True)
+def hist(IDs):
+    for ID in IDs:
+        patient = data.Patient(ID)
+        patient.hist()
+        print("Finish patient ", ID)
+
+
+# hist([1, 2, 3, 4, 5, 6, 7, 8])
+
+
+def info_numerical(IDs, isDm=True, isOther=True):
+    for ID in IDs:
+        patient = data.Patient(ID)
+        patient.info_numerical(isDm=isDm, isOther=isOther)
+        print("Finish patient ", ID)
+
+
+info_numerical([1, 2, 3, 4, 5, 6, 7, 8])
+info_numerical([9, 10, 11], isDm=False)
 
 
 def show_img(fpath, img_type="ct", x=None, y=None, z=None):
@@ -93,9 +144,8 @@ def show_img(fpath, img_type="ct", x=None, y=None, z=None):
 # show_img(fpath="dataset/patient6/dosemap_F18/dosemap.npy", img_type="dosemap", x=None, y=None, z=None)
 
 
-
 """
-    网络相关
+    网络相关*************************************************************************************************************
 """
 
 
