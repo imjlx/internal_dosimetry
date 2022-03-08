@@ -4,10 +4,8 @@ import numpy as np
 import SimpleITK as sitk
 import os
 
-import dataset
-from utils import data, Visual
+from utils import Data, Visual
 from model import AutoEncoder
-from utils import RemoveBed
 
 
 """
@@ -81,7 +79,7 @@ sitk.WriteImage(ct_img, "dataset/test_ct.nii")'''
 def create_dosemap_without_air(IDs):
     for ID in IDs:
         patient = data.PatientProcessor(ID)
-        patient.create_dosemap_without_air()
+        patient.create_dosemap_pet_without_air()
         print("Finish patient ", ID)
 
 

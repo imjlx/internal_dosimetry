@@ -12,6 +12,7 @@ import SimpleITK as sitk
 from typing import List, Dict, Tuple
 
 from utils import Visual
+from utils.RemoveBedFilter import RemoveBedFilter
 
 """
 读取原始文件的方法
@@ -96,25 +97,25 @@ def create_ct_without_bed(ct_origin, atlas, ct_AutoRemoveBed):
 
 
 @nb.jit(nopython=True, parallel=True)
-def _create_dosemap_without_air_SimpleThresholdOnCT(dm: np.ndarray, ct: np.ndarray, threshold: int) -> np.ndarray:
+def _create_dosemap_pet_without_air_SimpleThresholdOnCT(img: np.ndarray, ct: np.ndarray, threshold: int) -> np.ndarray:
     """
     设定一个最低的阈值, 低于该阈值的CT均认为是背景, 并将对应的dosemap设置为0
-    :param dm: 处理的dosemap
+    :param img: 处理的dosemap
     :param ct: 参考的ct
     :param threshold: 阈值
     :return: 处理后的dosemap
     """
     for i, pixel in enumerate(ct.flat):
         if pixel < threshold:
-            dm.flat[i] = 0
-    return dm
+            img.flat[i] = 0
+    return img
 
 
 @nb.jit(parallel=True)
 def _create_patch_index_array(img: np.ndarray, size: int, step: int, ratio: float) -> np.ndarray:
     """
-    根据img生成可取的块的坐标
-    :param img: 参考轮廓遮罩图
+    根据img生成可取的块的坐标, 以0为背景, 大于0的值为前景
+    :param img: 参考轮廓图
     :param size: 块的大小
     :param step: 块的间距
     :param ratio: 是否取的依据: 组织的占比
@@ -147,38 +148,15 @@ class PatientProcessor(object):
     project_path = r"E:\internal_dosimetry"
 
     def __init__(self, ID):
-        """
-        初始化
-        :param ID: 患者的序号
-        """
-
         # 患者ID和患者文件夹路径
         self.ID = ID
         self.patient_folder = PatientProcessor.project_path + r"\dataset\patient" + str(ID)
-
-        # 保存nib读取的原始文件
-        self.ct_hdr = None
-        self.ct_AutoRemoveBed_hdr = None
-        self.pet_hdr = None
-        self.dosemap_hdr = None
-        self.atlas_hdr = None
-
-        # 保存图像文件，4维
-        self.ct = None
-        self.ct_origin = None
-        self.ct_AutoRemoveBed = None
-        self.pet = None
-        self.dosemap = None
-        self.dosemap_withAir = None
-        self.atlas = None
-
-        # 图像的shape
-        self.shape = None
 
         # 生成的patch的个数
         self.n_patch = None
 
     # 测试中...
+    @staticmethod
     def resample(self, readPath, savePath):
         reader = sitk.ImageFileReader()
         reader.SetFileName(readPath)
@@ -200,15 +178,6 @@ class PatientProcessor(object):
         print(img.GetSize())
 
         # sitk.WriteImage(img, savePath)
-
-    def quicklook_npy(self, fpath):
-        fpath = os.path.join(self.patient_folder, fpath)
-        img = np.load(fpath)
-        count = 0
-        for i in img.flat:
-            if i == -1024:
-                count += 1
-        print(count / len(img.flat))
 
     # 基本文件的读取与保存
     def create_npy_origin(self, recreate: bool = False, **kwargs) -> None:
@@ -262,92 +231,84 @@ class PatientProcessor(object):
             return np.load(self.patient_folder + "\\npy\\" + fname + ".npy")
 
     # 文件进阶处理
-    def create_dosemap_without_air(self, dm: str = "dm_origin", ct: str = "ct_origin",
-                                   method: str = "SimpleThresholdOnCT", **kwargs) -> None:
+    def create_ct_without_bed(self):
+        remove_bed_filter = RemoveBedFilter(self.patient_folder + "\\hdr" + "\\ct.hdr")
+        print("Generating ct without bed...")
+        ct_AirRemoved = remove_bed_filter.Execute()
+        # sitk.Show(ct_AirRemoved)
+        ct_AirRemoved = sitk.GetArrayFromImage(ct_AirRemoved).T     # 转换为ndarray
+        np.save(os.path.join(self.patient_folder, "npy/ct_AirRemoved.npy"), ct_AirRemoved)
+        print(f"Patient{self.ID}'s ct_AirRemoved.npy file created.")
 
-        # 读取文件
-        dm = self._load_npy(dm)
-        ct = self._load_npy(ct)
+    def create_dosemap_pet_without_air(self, dm: str = None, pet: str = None,
+                                       reference_image: str = "ct_AirRemoved",
+                                       method: str = "MaskedCT", **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        去除dosemap中非人体部分的噪声值
+        :param dm: 原始dosemap
+        :param pet: 原始dosemap
+        :param reference_image: 参考图像, 方法不同参考图像含义不同
+        :param method: 选用的不同方法
+        :param kwargs: 方法的特定参数
+        :return: 处理后的dosemap, 并保存
+        """
+        if dm is not None:
+            dm = self._load_npy(dm)
+        if pet is not None:
+            pet = self._load_npy(pet)
         # 不同的处理方法
         if method == "SimpleThresholdOnCT":
             """
             设定一个最低的阈值, 低于该阈值的CT均认为是背景, 并将对应的dosemap设置为0
             """
-            # 如果没有指定threshold, 则设置为900
-            if 'threshold' not in kwargs.keys():
+            ct = self._load_npy(reference_image)    # 此时reference_img是ct
+            if 'threshold' not in kwargs.keys():    # 如果没有指定threshold, 则设置为900
                 kwargs['threshold'] = 900
             # 利用类外numba加速的函数处理
-            dm = _create_dosemap_without_air_SimpleThresholdOnCT(dm=dm, ct=ct, threshold=kwargs['threshold'])
-            # dm = create_dosemap_without_air(dm, ct)
-        elif method == "None":
-            pass
+            try:
+                dm = _create_dosemap_pet_without_air_SimpleThresholdOnCT(img=dm, ct=ct, threshold=kwargs['threshold'])
+            except TypeError:
+                print("Haven't assign dosemap to process.")
+            try:
+                pet = _create_dosemap_pet_without_air_SimpleThresholdOnCT(img=pet, ct=ct, threshold=kwargs['threshold'])
+            except TypeError:
+                print("Haven't assign pet to process.")
+        elif method == "MaskedCT":
+            """
+            利用去除背景信息和床的CT, CT背景值为-1024
+            """
+            mask = self._load_npy(reference_image)
+            try:
+                dm[mask == -1024] = 0
+            except TypeError:
+                print("Haven't assign dosemap to process.")
+            try:
+                pet[mask == -1024] = 0
+            except TypeError:
+                print("Haven't assign pet to process.")
+        else:
+            raise TypeError("unsupported method")
 
-        np.save(file=os.path.join(self.patient_folder, "dosemap_F18\\dm_AirRemoved.npy"), arr=dm)
-        print(f"Patient{self.ID}'s dm_AirRemoved.npy origin file created.")
+        # sitk.Show(sitk.GetImageFromArray(dm))
+        if dm is not None:
+            np.save(file=os.path.join(self.patient_folder, "dosemap_F18\\dm_AirRemoved.npy"), arr=dm)
+            print(f"Patient{self.ID}'s dm_AirRemoved.npy file created.")
+        if pet is not None:
+            np.save(file=os.path.join(self.patient_folder, "npy\\pet_AirRemoved.npy"), arr=pet)
+            print(f"Patient{self.ID}'s pet_AirRemoved.npy file created.")
 
-    def create_ct_without_bed(self):
-        self.ct_origin = np.load(os.path.join(self.patient_folder, "npy/ct_origin.npy"))
-        self.ct_AutoRemoveBed = np.load(os.path.join(self.patient_folder, "npy/ct_AutoRemoveBed.npy"))
-        self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
-
-        self.ct = create_ct_without_bed(self.ct_origin, self.atlas, self.ct_AutoRemoveBed)
-
-        np.save(os.path.join(self.patient_folder, "npy/ct.npy"), self.ct)
+        return pet, dm
 
     # 图像信息分析
-    def info_numerical(self, isDm=True, isOther=True):
+    def check_patch(self, n: int):
+        ct = np.load(self.patient_folder+"\\patch\\ct\\"+str(n)+".npy")
+        pet = np.load(self.patient_folder+"\\patch\\pet\\"+str(n)+".npy")
+        dm = np.load(self.patient_folder+"\\patch\\dosemap_F18\\"+str(n)+".npy")
 
-        info = pd.read_excel("dataset/info.xlsx", index_col="ID")
-
-        if isOther:
-            self.ct = np.load(os.path.join(self.patient_folder, "npy/ct.npy"))
-            self.pet = np.load(os.path.join(self.patient_folder, "npy/pet.npy"))
-            self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
-
-            # ct和pet处理相同
-            for img_type, img in zip(["ct", "pet"], [self.ct, self.pet]):
-                img_max = img.max(initial=None)
-                average = np.average(img)
-                median = np.median(img)
-                percentile = np.percentile(img, 99.8)
-
-                info.loc[str(self.ID) + "_" + img_type, "Min":"percentile_r"] = [
-                    img.min(initial=None), img_max,
-                    average, average / img_max,
-                    median, median / img_max,
-                    percentile, percentile / img_max
-                ]
-
-            # atlas只求最值
-            info.loc[str(self.ID) + "_atlas", "Min":"Max"] = [self.atlas.max(initial=None),
-                                                              self.atlas.min(initial=None)]
-
-        if isDm:
-            img_type = "dosemap"
-            img = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
-
-            img_max = img.max(initial=None)
-            average = np.average(img)
-            median = np.median(img)
-            percentile = np.percentile(img, 99.8)
-
-            info.loc[str(self.ID) + "_" + img_type, "Min":"percentile_r"] = [
-                img.min(initial=None), img_max,
-                average, average / img_max,
-                median, median / img_max,
-                percentile, percentile / img_max
-            ]
-
-        info.to_excel("dataset/info.xlsx")
-
-    def hist(self):
-        self.load_npy()
-        for data, img_type in zip([self.ct, self.ct_origin, self.ct_AutoRemoveBed,
-                                   self.dosemap_withAir, self.dosemap, self.atlas, self.pet],
-                                  ["ct", "ct_origin", "ct_AutoRemoveBed",
-                                   "dosemap_withAir", "dosemap", "atlas", "pet"]):
-            img = Visual.Image(data, img_type)
-            img.hist(self.patient_folder)
+        sitk.Show(sitk.GetImageFromArray(ct), "ct")
+        sitk.Show(sitk.GetImageFromArray(pet), "pet")
+        sitk.Show(sitk.GetImageFromArray(dm), "dosemap")
+        pass
 
     # 生成patch
     def create_patch_index_array(self, reference_img: np.ndarray, size: int, step: int, ratio: float) -> np.ndarray:
@@ -371,11 +332,24 @@ class PatientProcessor(object):
         time_end = time.time()
         print(f"已生成并保存, 用时{time_end - time_start}s")
 
+        self.n_patch = len(index_array)
         return index_array
 
     def create_patches(self, ct: str, pet: str, dm: str, reference_img: np.ndarray = None,
                        size: int = 128, step: int = 16, ratio: float = 0.5,
                        recreate_index_array: bool = False) -> None:
+        """
+        分割图像
+        :param ct: 待分割的ct
+        :param pet: 待分割的pet
+        :param dm: 待分割的dosemap
+        :param reference_img: 用于生成分割方法的参考图像, 默认为atlas
+        :param size: 块的大小
+        :param step: 块的间距
+        :param ratio: 是否取的依据: 组织的占比
+        :param recreate_index_array: 是否重新生成分割方案
+        :return: 无
+        """
 
         # 创建保存patch的文件夹
         folder_path_ct = self.patient_folder + "/patch/ct"
@@ -384,9 +358,9 @@ class PatientProcessor(object):
         for dirname in [folder_path_ct, folder_path_pet, folder_path_dm]:
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
-        # 设置参考轮廓的默认值--分割图像
+        # 设置默认参考轮廓--去背景后的ct
         if reference_img is None:
-            reference_img = self._load_npy("atlas_origin")
+            reference_img = self._load_npy("ct_AirRemoved") + 1024  # +1024使背景值为0
         # 生成/读取index_array
         fpath_index_array = self.patient_folder + "\\patch\\index_array.npy"
         if (not os.path.isfile(fpath_index_array)) or recreate_index_array:
@@ -455,81 +429,6 @@ class PatientProcessor(object):
 
         return ds
 
-    # 已替代, 存档用
-    def create_npy(self, isDm=True, isOther=True):
-        """
-        从hdr文件生成npy文件
-        :param isDm: 是否生成dosemap
-        :param isOther: 是否生成CT, PET, atlas
-        :return: 无
-        """
-        # 判断保存路径是否存在, 若不存在则创建
-        dirname = self.patient_folder + "/npy"
-        if not os.path.exists(dirname):
-            os.makedirs(dirname)
-
-        # 读取原始文件, 生成npy文件
-        self.load_hdr(isDm=isDm, isOther=isOther)
-
-        if isOther:
-            self.ct_origin = self.ct_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-            self.ct_AutoRemoveBed = self.ct_AutoRemoveBed_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-            self.pet = self.pet_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-            self.atlas = self.atlas_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.uint8)
-            np.save(os.path.join(self.patient_folder, "npy/ct_origin.npy"), self.ct_origin)
-            np.save(os.path.join(self.patient_folder, "npy/ct_AutoRemoveBed.npy"), self.ct_AutoRemoveBed)
-            np.save(os.path.join(self.patient_folder, "npy/pet.npy"), self.pet)
-            np.save(os.path.join(self.patient_folder, "npy/atlas.npy"), self.atlas)
-
-        if isDm:
-            self.dosemap_withAir = self.dosemap_hdr.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-            np.save(os.path.join(self.patient_folder, "dosemap_F18/dosemap_withAir.npy"), self.dosemap_withAir)
-
-    def load_hdr(self, isDm=True, isOther=True):
-        """
-        用nibabel读取.hdr & .img文件，读取后的结果为nib中的类，保存在self.XX_origin中
-        """
-        if isOther:
-            self.ct_hdr = nib.load(os.path.join(self.patient_folder, "hdr/ct.hdr"))
-            self.ct_AutoRemoveBed_hdr = nib.load(os.path.join(self.patient_folder, "hdr/ct_AutoRemoveBed.hdr"))
-            self.pet_hdr = nib.load(os.path.join(self.patient_folder, "hdr/pet.hdr"))
-            self.atlas_hdr = nib.load(os.path.join(self.patient_folder, "hdr/atlas.hdr"))
-
-        if isDm:
-            self.dosemap_hdr = nib.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.hdr"))
-
-        # 将基本信息保存在excel中
-        info = pd.read_excel("dataset/info.xlsx", index_col="ID")
-
-        if isOther:
-            for img_type, header in zip(["ct", "atlas", "pet"],
-                                        [self.ct_hdr.header, self.atlas_hdr.header, self.pet_hdr.header]):
-                info.loc[str(self.ID) + "_" + img_type, "dimx":"pixdimz"] = [
-                    header.get_data_shape()[0], header.get_data_shape()[1], header.get_data_shape()[2],
-                    header.get_zooms()[0], header.get_zooms()[1], header.get_zooms()[2]]
-        if isDm:
-            img_type = "dosemap"
-            header = self.dosemap_hdr.header
-            info.loc[str(self.ID) + "_" + img_type, "dimx":"pixdimz"] = [
-                header.get_data_shape()[0], header.get_data_shape()[1], header.get_data_shape()[2],
-                header.get_zooms()[0], header.get_zooms()[1], header.get_zooms()[2]]
-
-        info.to_excel("dataset/info.xlsx")
-
-    def load_npy(self):
-        """
-        读取npy文件
-        """
-        self.ct = np.load(os.path.join(self.patient_folder, "npy/ct.npy"))
-        self.ct_origin = np.load(os.path.join(self.patient_folder, "npy/ct_origin.npy"))
-        self.ct_AutoRemoveBed = np.load(os.path.join(self.patient_folder, "npy/ct_AutoRemoveBed.npy"))
-        self.pet = np.load(os.path.join(self.patient_folder, "npy/pet.npy"))
-        self.dosemap = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap.npy"))
-        self.dosemap_withAir = np.load(os.path.join(self.patient_folder, "dosemap_F18/dosemap_withAir.npy"))
-        self.atlas = np.load(os.path.join(self.patient_folder, "npy/atlas.npy"))
-
-        self.shape = self.ct.shape
-
 
 def create_train_dataset(p_ids, batch):
     ds = None
@@ -553,4 +452,10 @@ def create_train_dataset(p_ids, batch):
 if __name__ == '__main__':
     p = PatientProcessor(1)
     # p.create_npy_origin(recreate=True)
-    p.create_patches(ct="ct_origin", pet="pet_origin", dm="dm_AirRemoved", recreate_index_array=True)
+    # p.create_ct_without_bed()
+    # p.create_dosemap_pet_without_air(pet="pet_origin", dm="dm_origin", reference_image="ct_AirRemoved", method='MaskedCT')
+    # p.create_patches(ct="ct_AirRemoved", pet="pet_AirRemoved", dm="dm_AirRemoved", recreate_index_array=False)
+    p.check_patch(2)
+
+
+

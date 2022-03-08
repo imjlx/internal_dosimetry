@@ -5,7 +5,7 @@ import time
 import os
 from tqdm import tqdm
 
-from utils import data
+from utils import Data
 from utils import Loss, Metrics, Visual
 from model import AutoEncoder
 
