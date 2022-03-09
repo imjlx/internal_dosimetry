@@ -1,17 +1,23 @@
-import re
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+    @File       : Data.py
+    @Author     : Haoran Jia
+    @license    : Copyright(c) 2022 Haoran Jia. All rights reserved.
+    @contact    : 21211140001@m.fudan.edu.cn
+    @Description：
+"""
 
+import re
 import numpy as np
 import os
 import nibabel as nib
-# import tensorflow as tf
 import numba as nb
-import pandas as pd
 import tqdm
 import time
 import SimpleITK as sitk
 from typing import List, Dict, Tuple
 
-from utils import Visual
 from utils.RemoveBedFilter import RemoveBedFilter
 
 """
@@ -69,11 +75,6 @@ def load(fpath, img_type):
     img = normalize(img, img_type)
 
     return img
-
-
-"""
-病人相关操作
-"""
 
 
 @nb.jit(parallel=True)
@@ -141,16 +142,16 @@ def _create_patch_index_array(img: np.ndarray, size: int, step: int, ratio: floa
     return np.array(index_list)
 
 
-class PatientProcessor(object):
+class PatientDataProcessor(object):
     """
     用于对一位患者的图像数据进行处理
     """
     project_path = r"E:\internal_dosimetry"
 
-    def __init__(self, ID):
+    def __init__(self, ID: int):
         # 患者ID和患者文件夹路径
         self.ID = ID
-        self.patient_folder = PatientProcessor.project_path + r"\dataset\patient" + str(ID)
+        self.patient_folder = PatientDataProcessor.project_path + r"\dataset\patient" + str(ID)
 
         # 生成的patch的个数
         self.n_patch = None
@@ -384,51 +385,6 @@ class PatientProcessor(object):
                 np.save(os.path.join(folder_path_pet, str(n) + ".npy"), pet[i:i + size, j:j + size, k:k + size])
                 np.save(os.path.join(folder_path_dm, str(n) + ".npy"), dm[i:i + size, j:j + size, k:k + size])
 
-    @staticmethod
-    def _source_tensor(particle, energy):
-        if particle == "electron":
-            n = 0
-        elif particle == "positron":
-            n = 1
-        elif particle == "proton":
-            n = 2
-        elif particle == "neutron":
-            n = 3
-        elif particle == "alpha":
-            n = 4
-        else:
-            n = 6
-            quit("Particle type error!")
-        source = np.zeros(shape=[8, 8, 8, 5])
-        source[:, :, :, n] = energy
-        return tf.constant(source, dtype=tf.float32)
-
-    def create_train_dataset(self, particle, energy):
-        """
-        创建一个患者的所有patch的数据集,
-        其中: ct, pet, dosemap的patch数据需提前生产; source的输入在函数中生成.
-        :param particle: 生成dosemap的粒子的类型
-        :param energy: 粒子的能量
-        :return: ds, 结构为zip(ct, pet, source, dosemap)
-        """
-        # 创建文件名的数据集
-        ct = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/ct/*.npy"), shuffle=False)
-        pet = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/pet/*.npy"), shuffle=False)
-        dosemap = tf.data.Dataset.list_files(os.path.join(self.patient_folder, "patch/dosemap/*.npy"), shuffle=False)
-        # 计算患者patch的个数
-        self.n_patch = len(list(ct.as_numpy_iterator()))
-        # 利用load函数加载数据集
-        ct = ct.map(lambda x: tf.py_function(func=load, inp=[x, "ct"], Tout=tf.float32))
-        pet = pet.map(lambda x: tf.py_function(func=load, inp=[x, "pet"], Tout=tf.float32))
-        dosemap = dosemap.map(lambda x: tf.py_function(func=load, inp=[x, "dosemap"], Tout=tf.float32))
-
-        # self._source_tensor("positron", 10)
-        source = tf.data.Dataset.from_tensors(self._source_tensor(particle, energy)).repeat(self.n_patch)
-
-        ds = tf.data.Dataset.zip((ct, pet, source, dosemap))
-
-        return ds
-
 
 def create_train_dataset(p_ids, batch):
     ds = None
@@ -436,7 +392,7 @@ def create_train_dataset(p_ids, batch):
 
     # 将所有病人的dataset连接起来
     for i, p_id in enumerate(p_ids):
-        patient = PatientProcessor(ID=p_id)
+        patient = PatientDataProcessor(ID=p_id)
         if i == 0:
             ds = patient.create_train_dataset(particle="positron", energy=0.2498)
         else:
@@ -450,7 +406,7 @@ def create_train_dataset(p_ids, batch):
 
 
 if __name__ == '__main__':
-    p = PatientProcessor(1)
+    p = PatientDataProcessor(1)
     # p.create_npy_origin(recreate=True)
     # p.create_ct_without_bed()
     # p.create_dosemap_pet_without_air(pet="pet_origin", dm="dm_origin", reference_image="ct_AirRemoved", method='MaskedCT')

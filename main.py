@@ -52,7 +52,7 @@ def remove_bed(IDs, lower_threshold=600):
 # 从hdr文件生成npy文件
 def create_npy(IDs, isDm=True, isOther=True):
     for ID in IDs:
-        patient = data.PatientProcessor(ID)
+        patient = data.PatientDataProcessor(ID)
         patient.create_npy(isDm, isOther)
         print("Finish patient ", ID)
 
@@ -64,7 +64,7 @@ def create_npy(IDs, isDm=True, isOther=True):
 
 def create_ct_without_bed(IDs):
     for ID in IDs:
-        patient = data.PatientProcessor(ID)
+        patient = data.PatientDataProcessor(ID)
         patient.create_ct_without_bed()
         print("Finish patient ", ID)
 
@@ -78,7 +78,7 @@ sitk.WriteImage(ct_img, "dataset/test_ct.nii")'''
 
 def create_dosemap_without_air(IDs):
     for ID in IDs:
-        patient = data.PatientProcessor(ID)
+        patient = data.PatientDataProcessor(ID)
         patient.create_dosemap_pet_without_air()
         print("Finish patient ", ID)
 
@@ -92,7 +92,7 @@ sitk.WriteImage(dosemap_img, "dataset/test_dosemap.nii")'''
 # 生成切块文件
 def create_patch(IDs):
     for ID in IDs:
-        patient = data.PatientProcessor(ID)
+        patient = data.PatientDataProcessor(ID)
         patient.create_patch_pro()
         print("Finish patient ", ID)
 
@@ -110,7 +110,7 @@ def create_patch(IDs):
 
 def hist(IDs):
     for ID in IDs:
-        patient = data.PatientProcessor(ID)
+        patient = data.PatientDataProcessor(ID)
         patient.hist()
         print("Finish patient ", ID)
 
@@ -120,7 +120,7 @@ def hist(IDs):
 
 def info_numerical(IDs, isDm=True, isOther=True):
     for ID in IDs:
-        patient = data.PatientProcessor(ID)
+        patient = data.PatientDataProcessor(ID)
         patient.info_numerical(isDm=isDm, isOther=isOther)
         print("Finish patient ", ID)
 
@@ -157,7 +157,7 @@ def show_net_structure():
 
 
 def show_patient_dataset():
-    p = data.PatientProcessor(5)
+    p = data.PatientDataProcessor(5)
     p.create_train_dataset("positron", 20)
 
 
