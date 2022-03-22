@@ -4,77 +4,27 @@
     @File       : Data.py
     @Author     : Haoran Jia
     @license    : Copyright(c) 2022 Haoran Jia. All rights reserved.
-    @contact    : 21211140001@m.fudan.edu.cn
+    @contact    : 21211140001@fudan.m.edu.cn
     @Description：
 """
 
 import re
 import numpy as np
 import os
-import nibabel as nib
 import numba as nb
 import tqdm
 import time
 import SimpleITK as sitk
+import matplotlib.pyplot as plt
+
 from typing import List, Dict, Tuple
 
+from utils import Visual
 from utils.RemoveBedFilter import RemoveBedFilter
 
 """
 读取原始文件的方法
 """
-
-
-def read_nib(fpath):
-    """
-    读取.nii或.hdr文件，生成ndarray
-    :param fpath: .nii文件路径
-    :return: 返回numpy数组，四维，float32
-    """
-    img = nib.load(fpath)
-    data = img.get_fdata().squeeze(4).squeeze(4).astype(np.float32)
-    # print(data.shape)
-    return data
-
-
-def read_raw(fpath, shape=None):
-    data = np.fromfile(fpath, dtype=np.float32)
-    if shape is None:
-        img = data.reshape(512, 512, -1, 1)
-    else:
-        img = data.reshape(shape)
-    return img
-
-
-"""
-数据集处理中，读取的操作
-"""
-
-
-def normalize(img, img_type):
-    if img_type == "ct":
-        img = (img + 1024) / 4096
-    elif img_type == "pet":
-        pass
-    elif img_type == "dosemap":
-        pass
-
-    return img
-
-
-def load(fpath, img_type):
-    """
-    在数据集中, 用于将文件名转换为数据
-    :param fpath: 待读取文件的文件名
-    :param img_type: 数据类型(ct, pet, dosemap)
-    :return: 读取并处理后的
-    """
-    # 从文件名读取npy数据,输入的fpath是tensor,要利用.numpy()函数提取他的值
-    img = np.load(fpath.numpy())
-
-    img = normalize(img, img_type)
-
-    return img
 
 
 @nb.jit(parallel=True)
@@ -155,6 +105,16 @@ class PatientDataProcessor(object):
 
         # 生成的patch的个数
         self.n_patch = None
+
+    def Execute(self):
+        self.create_npy_origin(recreate=True)
+        print("移除CT床")
+        self.create_ct_without_bed()
+        print("移除PET, dosemap空气")
+        self.create_dosemap_pet_without_air(pet="pet_origin", dm="dm_origin")
+        print("切块")
+        self.create_patches(ct="ct_AirRemoved", pet="pet_AirRemoved", dm="dm_AirRemoved")
+        print("Patient finished")
 
     # 测试中...
     @staticmethod
@@ -300,17 +260,6 @@ class PatientDataProcessor(object):
 
         return pet, dm
 
-    # 图像信息分析
-    def check_patch(self, n: int):
-        ct = np.load(self.patient_folder+"\\patch\\ct\\"+str(n)+".npy")
-        pet = np.load(self.patient_folder+"\\patch\\pet\\"+str(n)+".npy")
-        dm = np.load(self.patient_folder+"\\patch\\dosemap_F18\\"+str(n)+".npy")
-
-        sitk.Show(sitk.GetImageFromArray(ct), "ct")
-        sitk.Show(sitk.GetImageFromArray(pet), "pet")
-        sitk.Show(sitk.GetImageFromArray(dm), "dosemap")
-        pass
-
     # 生成patch
     def create_patch_index_array(self, reference_img: np.ndarray, size: int, step: int, ratio: float) -> np.ndarray:
         """
@@ -376,7 +325,6 @@ class PatientDataProcessor(object):
         dm = self._load_npy(dm)
         # 提取并保存为npy文件
         n = 0
-        # time.sleep(0.01)
         with tqdm.tqdm(index_array) as bar:
             for i, j, k in bar:
                 bar.set_description("Saving .npy file")
@@ -385,33 +333,48 @@ class PatientDataProcessor(object):
                 np.save(os.path.join(folder_path_pet, str(n) + ".npy"), pet[i:i + size, j:j + size, k:k + size])
                 np.save(os.path.join(folder_path_dm, str(n) + ".npy"), dm[i:i + size, j:j + size, k:k + size])
 
+    # 数据分析
+    def hist(self):
+        plt.style.use("seaborn-paper")
+        gs = dict(top=0.9, bottom=0.05, hspace=0.25, left=0.1, right=0.95)
+        fig, axes = plt.subplots(3, 1, figsize=(8, 8), gridspec_kw=gs)
+        # ct
+        img = self._load_npy("ct_AirRemoved")
+        Visual.hist(axes[0], img, range=[-800, 1000], bins=200, title="CT", min_base=-1024)
+        # pet
+        img = self._load_npy("pet_AirRemoved")
+        Visual.hist(axes[1], img, bins=200, title="PET", min_base=0)
+        # dosemap
+        img = self._load_npy("dm_AirRemoved")
+        Visual.hist(axes[2], img, bins=200, title="Dosemap", min_base=0)
 
-def create_train_dataset(p_ids, batch):
-    ds = None
-    n_patch = 0
+        fig.suptitle(f"Histogram: Patient {self.ID}", fontsize='xx-large')
+        fig.show()
+        fig.savefig(fname=os.path.join(self.patient_folder, "histogram.png"), dpi=300)
+        print("figure saved")
+        pass
 
-    # 将所有病人的dataset连接起来
-    for i, p_id in enumerate(p_ids):
-        patient = PatientDataProcessor(ID=p_id)
-        if i == 0:
-            ds = patient.create_train_dataset(particle="positron", energy=0.2498)
-        else:
-            ds = ds.concatenate(patient.create_train_dataset(particle="positron", energy=0.2498))
-        n_patch += patient.n_patch
+    def check_patch(self, n: int):
+        ct = np.load(self.patient_folder + "\\patch\\ct\\" + str(n) + ".npy")
+        pet = np.load(self.patient_folder + "\\patch\\pet\\" + str(n) + ".npy")
+        dm = np.load(self.patient_folder + "\\patch\\dosemap_F18\\" + str(n) + ".npy")
 
-    # ds = ds.shuffle(buffer_size=n_patch).batch(batch)
-    ds = ds.batch(batch)
+        sitk.Show(sitk.GetImageFromArray(ct), "ct")
+        sitk.Show(sitk.GetImageFromArray(pet), "pet")
+        sitk.Show(sitk.GetImageFromArray(dm), "dosemap")
+        pass
 
-    return ds
 
 
 if __name__ == '__main__':
-    p = PatientDataProcessor(1)
+    # p = PatientDataProcessor(1)
     # p.create_npy_origin(recreate=True)
     # p.create_ct_without_bed()
     # p.create_dosemap_pet_without_air(pet="pet_origin", dm="dm_origin", reference_image="ct_AirRemoved", method='MaskedCT')
     # p.create_patches(ct="ct_AirRemoved", pet="pet_AirRemoved", dm="dm_AirRemoved", recreate_index_array=False)
-    p.check_patch(2)
+    # p.check_patch(2)
 
+    p = PatientDataProcessor(2)
+    p.hist()
 
 
