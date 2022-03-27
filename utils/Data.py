@@ -96,13 +96,13 @@ class PatientDataProcessor(object):
     """
     用于对一位患者的图像数据进行处理
     """
-    project_path = r"E:\internal_dosimetry"
+    # project_path = r"E:\JHR\internal_dosimetry"
+    project_path = os.path.dirname(os.path.dirname(__file__))
 
     def __init__(self, ID: int):
         # 患者ID和患者文件夹路径
         self.ID = ID
         self.patient_folder = PatientDataProcessor.project_path + r"\dataset\patient" + str(ID)
-
         # 生成的patch的个数
         self.n_patch = None
 
@@ -112,6 +112,8 @@ class PatientDataProcessor(object):
         self.create_ct_without_bed()
         print("移除PET, dosemap空气")
         self.create_dosemap_pet_without_air(pet="pet_origin", dm="dm_origin")
+        print("灰度直方图")
+        self.hist_for_full_img()
         print("切块")
         self.create_patches(ct="ct_AirRemoved", pet="pet_AirRemoved", dm="dm_AirRemoved")
         print("Patient finished")
@@ -285,9 +287,9 @@ class PatientDataProcessor(object):
         self.n_patch = len(index_array)
         return index_array
 
-    def create_patches(self, ct: str, pet: str, dm: str, reference_img: np.ndarray = None,
-                       size: int = 128, step: int = 16, ratio: float = 0.5,
-                       recreate_index_array: bool = False) -> None:
+    def create_patches(self, ct: str = "ct_AirRemoved", pet: str = "pet_AirRemoved", dm: str = "dm_AirRemoved",
+                       reference_img: np.ndarray = None, size: int = 128, step: int = 16, ratio: float = 0.5,
+                       recreate_index_array: bool = False, apply_normalization: bool = False) -> None:
         """
         分割图像
         :param ct: 待分割的ct
@@ -298,13 +300,19 @@ class PatientDataProcessor(object):
         :param step: 块的间距
         :param ratio: 是否取的依据: 组织的占比
         :param recreate_index_array: 是否重新生成分割方案
+        :param apply_normalization: 是否进行初始化
         :return: 无
         """
 
         # 创建保存patch的文件夹
-        folder_path_ct = self.patient_folder + "/patch/ct"
-        folder_path_pet = self.patient_folder + "/patch/pet"
-        folder_path_dm = self.patient_folder + "/patch/dosemap_F18"
+        if apply_normalization:
+            folder_path_ct = self.patient_folder + "/patch_norm/ct"
+            folder_path_pet = self.patient_folder + "/patch_norm/pet"
+            folder_path_dm = self.patient_folder + "/patch_norm/dosemap_F18"
+        else:
+            folder_path_ct = self.patient_folder + "/patch/ct"
+            folder_path_pet = self.patient_folder + "/patch/pet"
+            folder_path_dm = self.patient_folder + "/patch/dosemap_F18"
         for dirname in [folder_path_ct, folder_path_pet, folder_path_dm]:
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
@@ -323,18 +331,33 @@ class PatientDataProcessor(object):
         ct = self._load_npy(ct)
         pet = self._load_npy(pet)
         dm = self._load_npy(dm)
+
+        # 计算pet与dosemap的归一化系数
+        arr = pet.flatten()
+        arr = np.delete(arr, obj=np.where(arr == 0)[0])
+        coefficient = np.percentile(arr, 90)
+        np.save(self.patient_folder + "\\patch\\coefficient.npy", coefficient)
+
         # 提取并保存为npy文件
         n = 0
         with tqdm.tqdm(index_array) as bar:
             for i, j, k in bar:
                 bar.set_description("Saving .npy file")
                 n += 1
-                np.save(os.path.join(folder_path_ct, str(n) + ".npy"), ct[i:i + size, j:j + size, k:k + size])
-                np.save(os.path.join(folder_path_pet, str(n) + ".npy"), pet[i:i + size, j:j + size, k:k + size])
-                np.save(os.path.join(folder_path_dm, str(n) + ".npy"), dm[i:i + size, j:j + size, k:k + size])
+                if apply_normalization:
+                    np.save(os.path.join(folder_path_ct, str(n) + ".npy"),
+                            (ct[i:i + size, j:j + size, k:k + size] + 1024) / (1024 + 200))
+                    np.save(os.path.join(folder_path_pet, str(n) + ".npy"),
+                            pet[i:i + size, j:j + size, k:k + size] / coefficient)
+                    np.save(os.path.join(folder_path_dm, str(n) + ".npy"),
+                            dm[i:i + size, j:j + size, k:k + size] / coefficient)
+                else:
+                    np.save(os.path.join(folder_path_ct, str(n) + ".npy"), ct[i:i + size, j:j + size, k:k + size])
+                    np.save(os.path.join(folder_path_pet, str(n) + ".npy"), pet[i:i + size, j:j + size, k:k + size])
+                    np.save(os.path.join(folder_path_dm, str(n) + ".npy"), dm[i:i + size, j:j + size, k:k + size])
 
     # 数据分析
-    def hist(self):
+    def hist_for_full_img(self):
         plt.style.use("seaborn-paper")
         gs = dict(top=0.9, bottom=0.05, hspace=0.25, left=0.1, right=0.95)
         fig, axes = plt.subplots(3, 1, figsize=(8, 8), gridspec_kw=gs)
@@ -353,6 +376,31 @@ class PatientDataProcessor(object):
         fig.savefig(fname=os.path.join(self.patient_folder, "histogram.png"), dpi=300)
         print("figure saved")
         pass
+
+    def hist_for_patch(self):
+        pathes = [self.patient_folder + "\\patch_norm\\ct", self.patient_folder + "\\patch_norm\\pet",
+                self.patient_folder + "\\patch_norm\\dosemap_F18"]
+        n_patches = len(os.listdir(pathes[0]))
+        hist_arr = []
+        for n in range(1, n_patches+1):
+            p90 = []
+            for path in pathes:
+                img = np.load(os.path.join(path, str(n)+".npy"))
+                arr = img.flatten()
+                arr = np.delete(arr, obj=np.where(arr == 0)[0])
+                p90.append(np.percentile(arr, 90))
+            hist_arr.append(p90)
+        hist_arr = np.array(hist_arr)
+
+        plt.style.use("seaborn-paper")
+        gs = dict(top=0.9, bottom=0.05, hspace=0.25, left=0.1, right=0.95)
+        fig, axes = plt.subplots(3, 1, figsize=(8, 8), gridspec_kw=gs)
+        axes[0].hist(hist_arr[:, 0], bins=20)
+        axes[1].hist(hist_arr[:, 1], bins=20)
+        axes[2].hist(hist_arr[:, 2], bins=20)
+        fig.show()
+        pass
+        
 
     def check_patch(self, n: int):
         ct = np.load(self.patient_folder + "\\patch\\ct\\" + str(n) + ".npy")
@@ -374,7 +422,9 @@ if __name__ == '__main__':
     # p.create_patches(ct="ct_AirRemoved", pet="pet_AirRemoved", dm="dm_AirRemoved", recreate_index_array=False)
     # p.check_patch(2)
 
-    p = PatientDataProcessor(2)
-    p.hist()
+    for i in range(1, 2):
+        print(f"Patient {i}")
+        p = PatientDataProcessor(i)
+        print(p.project_path)
 
 

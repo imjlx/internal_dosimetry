@@ -22,6 +22,8 @@ def show_net_structure():
 
 
 if __name__ == "__main__":
-    framework = Framework.SequentialFramework(model=AutoEncoder.AutoEncoder1(), train_IDs=(1, ), test_IDs=(2, ), batch=1)
+    framework = Framework.SequentialFramework(model=AutoEncoder.AutoEncoder1(),
+                                              train_IDs=(1, 2, 3, 4, 5, 6, 7, 8, 9), test_IDs=(10, ), batch=4)
     framework.fit(200)
+
 

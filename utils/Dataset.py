@@ -18,13 +18,15 @@ from typing import List, Dict, Tuple
 
 class PatientDatasetProcessor(object):
 
-    project_path = r"E:\internal_dosimetry"
+    project_path = r"E:\JHR\internal_dosimetry"
 
     def __init__(self, ID):
         self.ID: int = ID
+        self.patient_folder: str = self.project_path + "\\dataset\\patient" + str(ID)
         self.patch_folder: str = self.project_path + "\\dataset\\patient" + str(ID) + "\\patch"
         self.n_patches: int = 0
         self.ds = None
+        self.coefficient = None
 
     def create_dataset(self, particle="positron", energy=0.2498):
         """
@@ -40,9 +42,9 @@ class PatientDatasetProcessor(object):
         # ct = list(tf.data.Dataset.as_numpy_iterator(ct))
 
         # 使用load函数加载数据集
-        ct = ct.map(lambda x: tf.py_function(func=self._load, inp=[x, 'ct'], Tout=tf.float32))
-        pet = pet.map(lambda x: tf.py_function(func=self._load, inp=[x, 'pet'], Tout=tf.float32))
-        dm = dm.map(lambda x: tf.py_function(func=self._load, inp=[x, 'dm'], Tout=tf.float32))
+        ct = ct.map(lambda x: tf.py_function(func=self._load, inp=[x], Tout=tf.float32))
+        pet = pet.map(lambda x: tf.py_function(func=self._load, inp=[x], Tout=tf.float32))
+        dm = dm.map(lambda x: tf.py_function(func=self._load, inp=[x], Tout=tf.float32))
         # ct = list(tf.data.Dataset.as_numpy_iterator(ct))
 
         # 生成放射源相关的输入
@@ -56,24 +58,14 @@ class PatientDatasetProcessor(object):
         return self.ds
 
     @staticmethod
-    def _load(fpath, img_type: str):
+    def _load(fpath):
         """
         tensorflow创建数据集的时候，调用以从文件名读取为数组, 并初始化
         :param fpath: npy文件地址(实际传入的是tf中的特殊结构, 要使用.numpy()提取作为内容的字符串)
-        :param img_type: 根据不同的文件类型进行初始化
         :return: 读取并处理后的的numpy数组
         """
-
         img = np.load(fpath.numpy())    # 根据fpath读取npy文件
         img = np.expand_dims(img, 3)    # 增加一个维度, 变为(xx, xx, xx, 1)
-
-        if img_type == 'ct':    # 针对不同数据进行规范化
-            pass
-        elif img_type == 'pet':
-            pass
-        elif img_type == 'dm':
-            pass
-
         return img
 
     @staticmethod
@@ -109,12 +101,15 @@ def create_dataset(patient_IDs: tuple, batch_size: int):
         n_patch += processor.n_patches
 
     # 打乱, 取batch
-    ds = ds.shuffle(buffer_size=n_patch).batch(batch_size)
-    ds_list = list(tf.data.Dataset.as_numpy_iterator(ds))
+    ds = ds.shuffle(buffer_size=256).batch(batch_size)
+    # ds_list = list(tf.data.Dataset.as_numpy_iterator(ds))
     return ds
 
 
 if __name__ == '__main__':
     # p = PatientDatasetProcessor(1)
     # p.create_dataset()
-    create_dataset((1,), batch_size=8)
+    ds = create_dataset((1,), batch_size=8)
+    print(ds)
+
+

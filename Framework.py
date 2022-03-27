@@ -94,6 +94,8 @@ class SequentialFramework(object):
         end = time.time()
         print('Training Finished, Run Time: ', time.strftime('%H:%M:%S', time.gmtime(end - start)))
 
+    def apply_model(self, )
+
 
 
 
