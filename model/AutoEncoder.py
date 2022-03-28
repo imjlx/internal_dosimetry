@@ -68,7 +68,10 @@ def AutoEncoder1():
 
     return tf.keras.Model(inputs=[ct_inputs, pet_inputs, source_inputs], outputs=dosemap)
 
-
+if __name__ == "__main__":
+    model = AutoEncoder1()
+    print(type(model))
+    pass
 
 
 

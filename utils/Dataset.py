@@ -18,12 +18,13 @@ from typing import List, Dict, Tuple
 
 class PatientDatasetProcessor(object):
 
-    project_path = r"E:\JHR\internal_dosimetry"
+    # project_path = r"E:\JHR\internal_dosimetry"
+    project_path = os.path.dirname(os.path.dirname(__file__))
 
     def __init__(self, ID):
         self.ID: int = ID
         self.patient_folder: str = self.project_path + "\\dataset\\patient" + str(ID)
-        self.patch_folder: str = self.project_path + "\\dataset\\patient" + str(ID) + "\\patch"
+        self.patch_folder: str = self.project_path + "\\dataset\\patient" + str(ID) + "\\patch_norm"
         self.n_patches: int = 0
         self.ds = None
         self.coefficient = None
@@ -53,7 +54,8 @@ class PatientDatasetProcessor(object):
         # source = list(tf.data.Dataset.as_numpy_iterator(source))
 
         # 组合为完整的患者的数据集
-        self.ds = tf.data.Dataset.zip((ct, pet, source, dm))
+        # self.ds = tf.data.Dataset.zip((ct, pet, source, dm))
+        self.ds = tf.data.Dataset.zip(((ct, pet, source), dm))
         # self.ds = list(tf.data.Dataset.as_numpy_iterator(self.ds))
         return self.ds
 
@@ -101,7 +103,7 @@ def create_dataset(patient_IDs: tuple, batch_size: int):
         n_patch += processor.n_patches
 
     # 打乱, 取batch
-    ds = ds.shuffle(buffer_size=256).batch(batch_size)
+    ds = ds.shuffle(buffer_size=64).batch(batch_size)
     # ds_list = list(tf.data.Dataset.as_numpy_iterator(ds))
     return ds
 

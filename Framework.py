@@ -5,7 +5,7 @@ import time
 import os
 from tqdm import tqdm
 
-from utils import Data, Dataset
+from utils import Dataset
 from utils import Loss, Metrics, Visual
 from model import AutoEncoder
 
@@ -83,6 +83,7 @@ class SequentialFramework(object):
             loss = tf.reduce_mean(loss, axis=0)
             with self.test_summary_writer.as_default():    # 记录到tensorboard中
                 tf.summary.scalar('loss', loss, step=epoch)
+
             """
                 保存模型
             """
@@ -94,10 +95,47 @@ class SequentialFramework(object):
         end = time.time()
         print('Training Finished, Run Time: ', time.strftime('%H:%M:%S', time.gmtime(end - start)))
 
-    def apply_model(self, )
+
+class SequentialFrameworkSimple(object):
+    def __init__(self, model: tf.keras.Model, train_IDs, test_IDs, batch_size=1):
+        self.CURRENT_TIME = time.strftime("%Y-%m-%d %H-%M-%S", time.localtime())
+        self.model = model
+        self.train_ds = Dataset.create_dataset(patient_IDs=train_IDs, batch_size=batch_size)
+        self.test_ds = Dataset.create_dataset(patient_IDs=test_IDs, batch_size=batch_size)
+        self.batch_size = batch_size
+
+    def Execute(self):
+        self.model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+            loss=tf.keras.losses.MeanAbsoluteError(),
+            metrics=[tf.keras.metrics.MeanSquaredError()]
+        )
+        # 检查点 与 tensorboard
+        cp_path = "checkpoints\\" + self.CURRENT_TIME + "\\cp-{epoch:0>4d}.ckpd"
+        tb_dir = "logs\\" + self.CURRENT_TIME
+
+        cp_callback = tf.keras.callbacks.ModelCheckpoint(
+            filepath=cp_path,
+            verbose=1,
+            save_weights_only=True,
+            save_freq='epoch'
+        )
+        self.model.save_weights(filepath=cp_path.format(epoch=0))
+
+        tb_callback = tf.keras.callbacks.TensorBoard(log_dir=tb_dir, histogram_freq=1)
+
+        # 训练
+        self.model.fit(
+            x=self.train_ds, epochs=5,
+            callbacks=[cp_callback, tb_callback],
+            validation_data=self.test_ds, validation_freq=5
+        )
+
+        self.model.evaluate(x=self.test_ds)
 
 
-
-
-
+if __name__ == "__main__":
+    f = SequentialFrameworkSimple(AutoEncoder.AutoEncoder1(), train_IDs=(1, ), test_IDs=(2, ))
+    f.Execute()
+    pass
 
